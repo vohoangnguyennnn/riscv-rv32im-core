@@ -7,7 +7,12 @@ rtl/core/alu.sv
 rtl/core/branch_unit.sv
 rtl/core/regfile.sv
 rtl/core/id_stage.sv
+rtl/core/forwarding_unit.sv
+rtl/core/hazard_unit.sv
+rtl/core/mul_unit.sv
+rtl/core/div_unit.sv
 rtl/core/ex_stage.sv
 rtl/core/pipeline_ctrl.sv
 rtl/core/lsu.sv
+rtl/core/csr_file.sv
 rtl/core/rv32_core.sv

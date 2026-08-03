@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // RV32IM + Zicsr execute-stage datapath and control-transfer resolver.
 //
 // Pipeline storage remains in rv32_core. This module applies EX forwarding,
@@ -6,9 +8,9 @@
 // only when the EX result is accepted, preventing repeated redirects while the
 // downstream stage is held.
 //
-// MUL/DIV are deliberately fail-safe until the dedicated handshake units are
-// integrated: an M-extension packet asserts wait_o and cannot advance with an
-// incorrect placeholder result.
+// MUL/DIV are blocking EX operations. Their request is launched only when no
+// older MEM/WB event blocks EX, and their sticky response is held until the
+// EX/MEM boundary accepts the completed instruction.
 module ex_stage (
   input  logic                    clk_i,
   input  logic                    rst_i,
@@ -21,10 +23,12 @@ module ex_stage (
   input  logic [31:0]             mem_wb_fwd_value_i,
 
   input  logic [31:0]             csr_rdata_i,
+  input  logic [31:0]             csr_mepc_i,
   input  logic                    csr_access_illegal_i,
   input  logic                    result_ready_i,
 
   output logic [11:0]             csr_raddr_o,
+  output logic                    csr_access_write_o,
   output wire rv32_pkg::ex_mem_t  ex_mem_o,
   output wire rv32_pkg::redirect_t control_redirect_o,
   output logic                    result_valid_o,
@@ -46,6 +50,8 @@ module ex_stage (
   logic      active;
   logic      is_csr;
   logic      is_mdu;
+  logic      is_mul;
+  logic      is_div;
   logic      is_control;
   logic      control_taken;
   word_t     control_target;
@@ -55,36 +61,69 @@ module ex_stage (
   word_t     csr_wdata;
   logic      csr_write;
 
+  logic      mul_req_valid;
+  logic      mul_req_ready;
+  logic      mul_rsp_valid;
+  logic      mul_rsp_ready;
+  word_t     mul_result;
+
+  logic      div_req_valid;
+  logic      div_req_ready;
+  logic      div_rsp_valid;
+  logic      div_rsp_ready;
+  word_t     div_result;
+
+  logic      mdu_rsp_valid;
+  word_t     mdu_result;
+  word_t     execution_result;
+
   ex_mem_t   ex_mem_d;
   redirect_t control_redirect_d;
 
-  // clk_i becomes stateful when mul_unit/div_unit are integrated. Keeping it
-  // in the final interface now avoids an integration-only port-contract change.
+  function automatic word_t select_forwarded_operand(
+    input fwd_sel_e select,
+    input word_t    regfile_value,
+    input word_t    ex_mem_value,
+    input word_t    mem_wb_value
+  );
+    begin
+      unique case (select)
+        FWD_EX_MEM: select_forwarded_operand = ex_mem_value;
+        FWD_MEM_WB: select_forwarded_operand = mem_wb_value;
+        default:    select_forwarded_operand = regfile_value;
+      endcase
+    end
+  endfunction
 
   assign active     = id_ex_i.valid && !rst_i && !kill_i;
   assign is_csr     = (id_ex_i.ctrl.csr_cmd != CSR_NONE);
-  // An exception already attached to the packet must drain to WB instead of
-  // being trapped behind an MDU command that will never be launched.
-  assign is_mdu = (id_ex_i.ctrl.mdu_op != MDU_NONE) && !id_ex_i.exc.valid;
+  assign is_mul     = (id_ex_i.ctrl.mdu_op == MDU_MUL)
+                   || (id_ex_i.ctrl.mdu_op == MDU_MULH)
+                   || (id_ex_i.ctrl.mdu_op == MDU_MULHSU)
+                   || (id_ex_i.ctrl.mdu_op == MDU_MULHU);
+  assign is_div     = (id_ex_i.ctrl.mdu_op == MDU_DIV)
+                   || (id_ex_i.ctrl.mdu_op == MDU_DIVU)
+                   || (id_ex_i.ctrl.mdu_op == MDU_REM)
+                   || (id_ex_i.ctrl.mdu_op == MDU_REMU);
+  // An exception already attached to the packet drains normally and must not
+  // launch a stale MDU request.
+  assign is_mdu     = (is_mul || is_div) && !id_ex_i.exc.valid;
   assign is_control = (id_ex_i.ctrl.branch_kind != BR_NONE) || id_ex_i.ctrl.is_mret;
 
   always_comb begin
-    forwarded_rs1 = id_ex_i.rs1_value;
-    forwarded_rs2 = id_ex_i.rs2_value;
+    forwarded_rs1 = select_forwarded_operand(
+      fwd_a_sel_i,
+      id_ex_i.rs1_value,
+      ex_mem_fwd_value_i,
+      mem_wb_fwd_value_i
+    );
 
-    unique case (fwd_a_sel_i)
-      FWD_REGFILE: forwarded_rs1 = id_ex_i.rs1_value;
-      FWD_EX_MEM:  forwarded_rs1 = ex_mem_fwd_value_i;
-      FWD_MEM_WB:  forwarded_rs1 = mem_wb_fwd_value_i;
-      default:     forwarded_rs1 = id_ex_i.rs1_value;
-    endcase
-
-    unique case (fwd_b_sel_i)
-      FWD_REGFILE: forwarded_rs2 = id_ex_i.rs2_value;
-      FWD_EX_MEM:  forwarded_rs2 = ex_mem_fwd_value_i;
-      FWD_MEM_WB:  forwarded_rs2 = mem_wb_fwd_value_i;
-      default:     forwarded_rs2 = id_ex_i.rs2_value;
-    endcase
+    forwarded_rs2 = select_forwarded_operand(
+      fwd_b_sel_i,
+      id_ex_i.rs2_value,
+      ex_mem_fwd_value_i,
+      mem_wb_fwd_value_i
+    );
   end
 
   always_comb begin
@@ -123,17 +162,69 @@ module ex_stage (
     .misaligned_o (branch_target_misaligned)
   );
 
+  // result_ready_i is also the launch permission: an MDU must not start while
+  // an older memory operation, fault, or WB trap owns pipeline priority.
+  assign mul_req_valid = active && is_mul && result_ready_i && mul_req_ready;
+  assign div_req_valid = active && is_div && result_ready_i && div_req_ready;
+  assign mul_rsp_ready = active && is_mul && result_ready_i;
+  assign div_rsp_ready = active && is_div && result_ready_i;
+
+  mul_unit u_mul_unit (
+    .clk_i       (clk_i),
+    .rst_i       (rst_i),
+    .kill_i      (kill_i),
+    .req_valid_i (mul_req_valid),
+    .req_ready_o (mul_req_ready),
+    .op_i        (id_ex_i.ctrl.mdu_op),
+    .lhs_i       (forwarded_rs1),
+    .rhs_i       (forwarded_rs2),
+    .rsp_valid_o (mul_rsp_valid),
+    .rsp_ready_i (mul_rsp_ready),
+    .result_o    (mul_result)
+  );
+
+  div_unit u_div_unit (
+    .clk_i       (clk_i),
+    .rst_i       (rst_i),
+    .kill_i      (kill_i),
+    .req_valid_i (div_req_valid),
+    .req_ready_o (div_req_ready),
+    .op_i        (id_ex_i.ctrl.mdu_op),
+    .lhs_i       (forwarded_rs1),
+    .rhs_i       (forwarded_rs2),
+    .rsp_valid_o (div_rsp_valid),
+    .rsp_ready_i (div_rsp_ready),
+    .result_o    (div_result)
+  );
+
+  always_comb begin
+    mdu_rsp_valid   = 1'b0;
+    mdu_result      = 32'b0;
+    execution_result = alu_result;
+
+    if (is_mul) begin
+      mdu_rsp_valid = mul_rsp_valid;
+      mdu_result    = mul_result;
+    end else if (is_div) begin
+      mdu_rsp_valid = div_rsp_valid;
+      mdu_result    = div_result;
+    end
+
+    if (is_mdu) begin
+      execution_result = mdu_result;
+    end
+  end
+
   // CSR immediate forms use the zero-extended zimm field, while register forms
   // consume the forwarded rs1 value. CSRRS/CSRRC suppress the architectural
   // write when rs1=x0; their immediate forms do the same when zimm=0.
   always_comb begin
-    csr_raddr_o = 12'b0;
-    csr_wdata   = 32'b0;
-    csr_write   = 1'b0;
+    csr_raddr_o        = 12'b0;
+    csr_access_write_o = 1'b0;
+    csr_wdata          = 32'b0;
+    csr_write          = 1'b0;
 
-    if (active && id_ex_i.ctrl.is_mret) begin
-      csr_raddr_o = CSR_MEPC;
-    end else if (active && is_csr) begin
+    if (active && is_csr) begin
       csr_raddr_o = id_ex_i.insn[31:20];
     end
 
@@ -173,6 +264,8 @@ module ex_stage (
         csr_write   = 1'b0;
       end
     endcase
+
+    csr_access_write_o = active && is_csr && csr_write;
   end
 
   always_comb begin
@@ -181,18 +274,18 @@ module ex_stage (
 
     if (id_ex_i.ctrl.is_mret) begin
       control_taken  = 1'b1;
-      control_target = csr_rdata_i;
+      control_target = csr_mepc_i;
     end
 
     // branch_unit already checks this for branch/JAL/JALR. Re-checking the
     // selected target also covers MRET without creating a separate comparator.
     control_target_misaligned = id_ex_i.ctrl.is_mret ? (control_taken && (control_target[1:0] != 2'b00)) : branch_target_misaligned;
 
-    // Non-MDU operations are combinationally available. Valid never depends on
-    // ready; this preserves ordinary ready/valid semantics under backpressure.
-    result_valid_o = active && !is_mdu;
+    // Non-MDU results are combinational; MDU results become valid only with the
+    // selected unit response. Valid remains independent of downstream ready.
+    result_valid_o = active && (!is_mdu || mdu_rsp_valid);
     ex_fire        = result_valid_o && result_ready_i;
-    wait_o         = active && (is_mdu || !result_ready_i);
+    wait_o         = active && !ex_fire;
 
     ex_mem_d = '0;
 
@@ -203,7 +296,7 @@ module ex_stage (
       ex_mem_d.rd             = id_ex_i.rd;
       ex_mem_d.reg_write      = id_ex_i.ctrl.reg_write;
       ex_mem_d.wb_sel         = id_ex_i.ctrl.wb_sel;
-      ex_mem_d.ex_result      = alu_result;
+      ex_mem_d.ex_result      = execution_result;
       ex_mem_d.store_data     = forwarded_rs2;
       ex_mem_d.mem_cmd        = id_ex_i.ctrl.mem_cmd;
       ex_mem_d.mem_size       = id_ex_i.ctrl.mem_size;
@@ -220,7 +313,7 @@ module ex_stage (
       // An older IF/ID exception attached to this packet has priority over
       // faults discovered by EX.
       if (!ex_mem_d.exc.valid) begin
-        if ((is_csr || id_ex_i.ctrl.is_mret) && csr_access_illegal_i) begin
+        if (is_csr && csr_access_illegal_i) begin
           ex_mem_d.exc.valid = 1'b1;
           ex_mem_d.exc.cause = EXC_ILLEGAL_INSN;
           ex_mem_d.exc.tval  = id_ex_i.insn;

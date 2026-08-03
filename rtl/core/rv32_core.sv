@@ -1,12 +1,11 @@
+// SPDX-License-Identifier: MIT
+
 // RV32IM five-stage pipeline integration.
 //
 // This module owns the IF/ID, ID/EX, EX/MEM, and MEM/WB registers and is the
-// single architectural commit point for the core.  The current integration
-// milestone intentionally selects register-file operands in EX and leaves the
-// hazard inputs inactive; programs used at this bring-up stage must therefore
-// schedule RAW dependencies with NOPs.  Dedicated forwarding, hazard, MDU, and
-// CSR blocks can be connected without changing the pipeline-register or trace
-// contracts established here.
+// single architectural commit point for the core. EX forwarding, ID load-use
+// hazard detection, blocking RV32M execution, Zicsr commit, and precise
+// machine-mode trap state are integrated here.
 module rv32_core #(
   parameter logic [31:0] RESET_VECTOR = 32'h0000_0000,
   parameter logic [31:0] TRAP_VECTOR  = 32'h0000_0100
@@ -76,9 +75,6 @@ module rv32_core #(
   logic      ex_wait;
   logic      mem_wait;
 
-  // Forwarding and data-hazard units are deliberately added in the next
-  // integration milestone.  Keeping named constants here makes that change a
-  // local wiring replacement rather than a datapath rewrite.
   fwd_sel_e ex_fwd_a_sel;
   fwd_sel_e ex_fwd_b_sel;
   word_t    ex_mem_fwd_value;
@@ -91,10 +87,41 @@ module rv32_core #(
   // --------------------------------------------------------------------------
   logic wb_retire;
   logic wb_reg_write;
+  logic wb_csr_write;
 
-  assign wb_trap     = mem_wb_q.valid && mem_wb_q.exc.valid;
-  assign wb_retire   = mem_wb_q.valid && !mem_wb_q.exc.valid;
+  csr_addr_t csr_raddr;
+  logic      csr_access_write;
+  word_t     csr_rdata;
+  logic      csr_access_illegal;
+  word_t     csr_mtvec;
+  word_t     csr_mepc;
+
+  assign wb_trap      = mem_wb_q.valid && mem_wb_q.exc.valid;
+  assign wb_retire    = mem_wb_q.valid && !mem_wb_q.exc.valid;
   assign wb_reg_write = wb_retire && mem_wb_q.reg_write && (mem_wb_q.rd != 5'd0);
+  assign wb_csr_write = wb_retire && mem_wb_q.csr_write;
+
+  csr_file #(
+    .TRAP_VECTOR (TRAP_VECTOR)
+  ) u_csr_file (
+    .clk_i              (clk_i),
+    .rst_i              (rst_i),
+    .raddr_i            (csr_raddr),
+    .access_cmd_i       (id_ex_q.ctrl.csr_cmd),
+    .access_write_i     (csr_access_write),
+    .rdata_o            (csr_rdata),
+    .access_illegal_o   (csr_access_illegal),
+    .commit_write_i     (wb_csr_write),
+    .commit_waddr_i     (mem_wb_q.csr_addr),
+    .commit_wdata_i     (mem_wb_q.csr_wdata),
+    .retire_i           (wb_retire),
+    .trap_valid_i       (wb_trap),
+    .trap_pc_i          (mem_wb_q.pc),
+    .trap_cause_i       (mem_wb_q.exc.cause),
+    .trap_tval_i        (mem_wb_q.exc.tval),
+    .mtvec_o            (csr_mtvec),
+    .mepc_o             (csr_mepc)
+  );
 
   // Retirement trace is driven only from MEM/WB.  A trap is a trace event but
   // is not a retired instruction and cannot write architectural state.
@@ -162,6 +189,20 @@ module rv32_core #(
 
   assign id_exception = id_ex_d.valid && id_ex_d.exc.valid;
 
+  hazard_unit u_hazard_unit (
+    .id_valid_i    (id_ex_d.valid),
+    .id_rs1_i      (id_ex_d.rs1),
+    .id_rs2_i      (id_ex_d.rs2),
+    .id_csr_addr_i (id_ex_d.insn[31:20]),
+    .id_ctrl_i     (id_ex_d.ctrl),
+    .id_ex_i       (id_ex_q),
+    .ex_mem_i      (ex_mem_q),
+    .mem_wb_i      (mem_wb_q),
+    .load_use_o    (load_use_hazard),
+    .csr_dep_o     (csr_dependency),
+    .stall_id_o    ()
+  );
+
   // --------------------------------------------------------------------------
   // EX
   // --------------------------------------------------------------------------
@@ -169,12 +210,24 @@ module rv32_core #(
   logic        ex_result_ready;
   logic        ex_kill;
 
-  assign ex_fwd_a_sel     = FWD_REGFILE;
-  assign ex_fwd_b_sel     = FWD_REGFILE;
-  assign ex_mem_fwd_value = 32'b0;
   assign mem_wb_fwd_value = mem_wb_q.wb_data;
-  assign load_use_hazard  = 1'b0;
-  assign csr_dependency   = 1'b0;
+
+  forwarding_unit u_forwarding_unit (
+    .id_ex_i      (id_ex_q),
+    .ex_mem_i     (ex_mem_q),
+    .mem_wb_i     (mem_wb_q),
+    .ex_a_sel_o   (ex_fwd_a_sel),
+    .ex_b_sel_o   (ex_fwd_b_sel)
+  );
+
+  always_comb begin
+    unique case (ex_mem_q.wb_sel)
+      WB_EX_RESULT: ex_mem_fwd_value = ex_mem_q.ex_result;
+      WB_PC4:       ex_mem_fwd_value = ex_mem_q.pc + 32'd4;
+      WB_CSR:       ex_mem_fwd_value = ex_mem_q.csr_old;
+      default:      ex_mem_fwd_value = 32'b0;
+    endcase
+  end
 
   // An older WB trap or newly completed MEM fault wins over all EX work.  MEM
   // backpressure removes downstream readiness without killing the held ID/EX
@@ -191,10 +244,12 @@ module rv32_core #(
     .fwd_b_sel_i            (ex_fwd_b_sel),
     .ex_mem_fwd_value_i     (ex_mem_fwd_value),
     .mem_wb_fwd_value_i     (mem_wb_fwd_value),
-    .csr_rdata_i            (32'b0),
-    .csr_access_illegal_i   (1'b1),
+    .csr_rdata_i            (csr_rdata),
+    .csr_mepc_i             (csr_mepc),
+    .csr_access_illegal_i   (csr_access_illegal),
     .result_ready_i         (ex_result_ready),
-    .csr_raddr_o            (),
+    .csr_raddr_o            (csr_raddr),
+    .csr_access_write_o     (csr_access_write),
     .ex_mem_o               (ex_mem_d),
     .control_redirect_o     (control_redirect),
     .result_valid_o         (ex_result_valid),
@@ -203,8 +258,10 @@ module rv32_core #(
 
   // Only faults discovered in EX are reported as new EX events.  Exceptions
   // already attached by IF/ID simply continue draining with their packet.
-  assign ex_exception = ex_result_valid && ex_mem_d.exc.valid &&
-                        !id_ex_q.exc.valid && ex_result_ready;
+  assign ex_exception = ex_result_valid
+                      && ex_mem_d.exc.valid
+                      && !id_ex_q.exc.valid
+                      && ex_result_ready;
 
   // --------------------------------------------------------------------------
   // MEM
@@ -325,7 +382,7 @@ module rv32_core #(
     .mem_exception_i      (mem_exception),
     .wb_trap_i            (wb_trap),
     .control_redirect_i   (control_redirect),
-    .mtvec_i              ({TRAP_VECTOR[31:2], 2'b00}),
+    .mtvec_i              (csr_mtvec),
     .pc_enable_o          (pc_enable),
     .if_id_enable_o       (if_id_enable),
     .id_ex_enable_o       (id_ex_enable),
