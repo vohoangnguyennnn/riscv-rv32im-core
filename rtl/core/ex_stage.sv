@@ -65,10 +65,8 @@ module ex_stage (
   assign is_csr     = (id_ex_i.ctrl.csr_cmd != CSR_NONE);
   // An exception already attached to the packet must drain to WB instead of
   // being trapped behind an MDU command that will never be launched.
-  assign is_mdu =
-    (id_ex_i.ctrl.mdu_op != MDU_NONE) && !id_ex_i.exc.valid;
-  assign is_control =
-    (id_ex_i.ctrl.branch_kind != BR_NONE) || id_ex_i.ctrl.is_mret;
+  assign is_mdu = (id_ex_i.ctrl.mdu_op != MDU_NONE) && !id_ex_i.exc.valid;
+  assign is_control = (id_ex_i.ctrl.branch_kind != BR_NONE) || id_ex_i.ctrl.is_mret;
 
   always_comb begin
     forwarded_rs1 = id_ex_i.rs1_value;
@@ -188,9 +186,7 @@ module ex_stage (
 
     // branch_unit already checks this for branch/JAL/JALR. Re-checking the
     // selected target also covers MRET without creating a separate comparator.
-    control_target_misaligned = id_ex_i.ctrl.is_mret
-      ? (control_taken && (control_target[1:0] != 2'b00))
-      : branch_target_misaligned;
+    control_target_misaligned = id_ex_i.ctrl.is_mret ? (control_taken && (control_target[1:0] != 2'b00)) : branch_target_misaligned;
 
     // Non-MDU operations are combinationally available. Valid never depends on
     // ready; this preserves ordinary ready/valid semantics under backpressure.
@@ -224,7 +220,7 @@ module ex_stage (
       // An older IF/ID exception attached to this packet has priority over
       // faults discovered by EX.
       if (!ex_mem_d.exc.valid) begin
-        if (is_csr && csr_access_illegal_i) begin
+        if ((is_csr || id_ex_i.ctrl.is_mret) && csr_access_illegal_i) begin
           ex_mem_d.exc.valid = 1'b1;
           ex_mem_d.exc.cause = EXC_ILLEGAL_INSN;
           ex_mem_d.exc.tval  = id_ex_i.insn;
@@ -246,12 +242,7 @@ module ex_stage (
 
     control_redirect_d = '0;
 
-    if (
-      ex_fire &&
-      is_control &&
-      control_taken &&
-      !ex_mem_d.exc.valid
-    ) begin
+    if (ex_fire && is_control && control_taken && !ex_mem_d.exc.valid) begin
       control_redirect_d.valid  = 1'b1;
       control_redirect_d.target = control_target;
       control_redirect_d.origin = REDIRECT_FROM_EX;

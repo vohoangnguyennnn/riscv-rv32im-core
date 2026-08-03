@@ -194,11 +194,7 @@ module lsu (
       );
     end
 
-    response_exception = make_access_exception(
-      cmd_q,
-      addr_q,
-      dmem_m.rsp_err
-    );
+    response_exception = make_access_exception(cmd_q, addr_q, dmem_m.rsp_err);
   end
 
   // Interface outputs are benign unless their corresponding valid is high.

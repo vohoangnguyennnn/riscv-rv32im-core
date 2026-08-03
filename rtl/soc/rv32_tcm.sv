@@ -14,8 +14,7 @@ module rv32_tcm #(
 );
 
   localparam int unsigned WORD_COUNT = BYTES / 4;
-  localparam int unsigned INDEX_WIDTH =
-    (WORD_COUNT > 1) ? $clog2(WORD_COUNT) : 1;
+  localparam int unsigned INDEX_WIDTH = (WORD_COUNT > 1) ? $clog2(WORD_COUNT) : 1;
   localparam logic [32:0] BYTE_COUNT = {1'b0, BYTES};
 
   (* ram_style = "block" *)
@@ -30,18 +29,15 @@ module rv32_tcm #(
   logic imem_read_ok;
 
   assign imem_byte_offset = {1'b0, imem_s.req_addr} - {1'b0, BASE_ADDR};
-  assign dmem_byte_offset = {1'b0, dmem_s.req_addr}
-                          - {1'b0, BASE_ADDR};
+  assign dmem_byte_offset = {1'b0, dmem_s.req_addr} - {1'b0, BASE_ADDR};
 
   assign imem_word_index = imem_byte_offset[INDEX_WIDTH+1:2];
   assign dmem_word_index = dmem_byte_offset[INDEX_WIDTH+1:2];
 
   // Request addresses are byte addresses, but every TCM transaction transfers
   // one aligned 32-bit word. LSU handles architectural misalignment earlier.
-  assign imem_in_range = (imem_byte_offset < BYTE_COUNT)
-                       && (imem_s.req_addr[1:0] == 2'b00);
-  assign dmem_in_range = (dmem_byte_offset < BYTE_COUNT)
-                       && (dmem_s.req_addr[1:0] == 2'b00);
+  assign imem_in_range = (imem_byte_offset < BYTE_COUNT) && (imem_s.req_addr[1:0] == 2'b00);
+  assign dmem_in_range = (dmem_byte_offset < BYTE_COUNT) && (dmem_s.req_addr[1:0] == 2'b00);
 
   // The instruction port is deliberately read-only.
   assign imem_read_ok = imem_in_range && !imem_s.req_write && (imem_s.req_wstrb == 4'b0000);
