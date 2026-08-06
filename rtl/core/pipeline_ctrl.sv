@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 // Centralized control for the RV32IM five-stage pipeline.
 //
 // Pipeline-register storage remains in rv32_core. This module emits only
@@ -35,12 +37,56 @@ module pipeline_ctrl (
 
   import rv32_pkg::*;
 
+  typedef enum logic [3:0] {
+    ACTION_ADVANCE,
+    ACTION_ID_HAZARD,
+    ACTION_ID_EXCEPTION,
+    ACTION_EX_REDIRECT,
+    ACTION_TRAP_DRAIN,
+    ACTION_EX_WAIT,
+    ACTION_EX_EXCEPTION,
+    ACTION_MEM_WAIT,
+    ACTION_MEM_EXCEPTION,
+    ACTION_WB_TRAP,
+    ACTION_RESET
+  } pipeline_action_e;
+
   logic trap_drain_q;
   logic trap_drain_d;
   logic id_hazard;
+  pipeline_action_e action;
 
   assign id_hazard   = load_use_i || csr_dep_i;
   assign trap_drain_o = trap_drain_q;
+
+  // Select exactly one pipeline action.  The source order is the architectural
+  // age/priority order from the design specification; enum numeric values do
+  // not encode priority and are used only to make waveforms self-describing.
+  always_comb begin
+    action = ACTION_ADVANCE;
+
+    if (rst_i) begin
+      action = ACTION_RESET;
+    end else if (wb_trap_i) begin
+      action = ACTION_WB_TRAP;
+    end else if (mem_exception_i) begin
+      action = ACTION_MEM_EXCEPTION;
+    end else if (mem_wait_i) begin
+      action = ACTION_MEM_WAIT;
+    end else if (ex_exception_i) begin
+      action = ACTION_EX_EXCEPTION;
+    end else if (ex_wait_i) begin
+      action = ACTION_EX_WAIT;
+    end else if (trap_drain_q) begin
+      action = ACTION_TRAP_DRAIN;
+    end else if (control_redirect_i.valid) begin
+      action = ACTION_EX_REDIRECT;
+    end else if (id_exception_i) begin
+      action = ACTION_ID_EXCEPTION;
+    end else if (id_hazard) begin
+      action = ACTION_ID_HAZARD;
+    end
+  end
 
   always_comb begin
     // Normal pipeline advance. Flush has priority over enable at the pipeline
@@ -60,113 +106,123 @@ module pipeline_ctrl (
     redirect_pc_o    = 32'b0;
     trap_drain_d     = trap_drain_q;
 
-    // Synchronous reset is also handled directly by every pipeline register
-    // and IF stage. Driving an all-stage flush here makes the controller output
-    // benign and unambiguous during reset.
-    if (rst_i) begin
-      pc_enable_o     = 1'b0;
-      if_id_enable_o  = 1'b0;
-      id_ex_enable_o  = 1'b0;
-      ex_mem_enable_o = 1'b0;
-      mem_wb_enable_o = 1'b0;
+    unique case (action)
+      // Synchronous reset is also handled directly by every pipeline register
+      // and IF stage.  An all-stage flush keeps outputs benign during reset.
+      ACTION_RESET: begin
+        pc_enable_o     = 1'b0;
+        if_id_enable_o  = 1'b0;
+        id_ex_enable_o  = 1'b0;
+        ex_mem_enable_o = 1'b0;
+        mem_wb_enable_o = 1'b0;
 
-      if_id_flush_o  = 1'b1;
-      id_ex_flush_o  = 1'b1;
-      ex_mem_flush_o = 1'b1;
-      mem_wb_flush_o = 1'b1;
+        if_id_flush_o  = 1'b1;
+        id_ex_flush_o  = 1'b1;
+        ex_mem_flush_o = 1'b1;
+        mem_wb_flush_o = 1'b1;
 
-      trap_drain_d = 1'b0;
+        trap_drain_d = 1'b0;
+      end
 
-    // The trapping instruction is committing in WB. Squash every younger
-    // packet, consume the current MEM/WB entry, and restart fetch at mtvec.
-    end else if (wb_trap_i) begin
-      if_id_flush_o  = 1'b1;
-      id_ex_flush_o  = 1'b1;
-      ex_mem_flush_o = 1'b1;
-      mem_wb_flush_o = 1'b1;
+      // The trapping instruction commits its mepc/mcause/mtval update in the
+      // CSR file at this edge. Squash all younger packets, consume MEM/WB, and
+      // restart fetch at the current aligned direct-mode mtvec value.
+      ACTION_WB_TRAP: begin
+        if_id_flush_o  = 1'b1;
+        id_ex_flush_o  = 1'b1;
+        ex_mem_flush_o = 1'b1;
+        mem_wb_flush_o = 1'b1;
 
-      redirect_valid_o = 1'b1;
-      redirect_pc_o    = {mtvec_i[31:2], 2'b00};
-      trap_drain_d     = 1'b0;
+        redirect_valid_o = 1'b1;
+        redirect_pc_o    = {mtvec_i[31:2], 2'b00};
+        trap_drain_d     = 1'b0;
+      end
 
-    // A MEM exception is the oldest newly detected fault. Let the offending
-    // instruction enter MEM/WB and squash every younger stage.
-    end else if (mem_exception_i) begin
-      pc_enable_o = 1'b0;
+      // Let the offending MEM instruction enter MEM/WB and squash all younger
+      // work, including the unaccepted combinational EX result.
+      ACTION_MEM_EXCEPTION: begin
+        pc_enable_o = 1'b0;
 
-      if_id_flush_o  = 1'b1;
-      id_ex_flush_o  = 1'b1;
-      ex_mem_flush_o = 1'b1;
+        if_id_flush_o  = 1'b1;
+        id_ex_flush_o  = 1'b1;
+        ex_mem_flush_o = 1'b1;
 
-      trap_drain_d = 1'b1;
+        trap_drain_d = 1'b1;
+      end
 
-    // MEM owns EX/MEM while waiting. Older WB may commit once, then MEM/WB must
-    // become a bubble to prevent repeated retirement on subsequent wait cycles.
-    end else if (mem_wait_i) begin
-      pc_enable_o     = 1'b0;
-      if_id_enable_o  = 1'b0;
-      id_ex_enable_o  = 1'b0;
-      ex_mem_enable_o = 1'b0;
+      // EX/MEM remains owned by the memory instruction.  MEM/WB receives one
+      // bubble after an older WB entry commits, preventing repeated retirement.
+      ACTION_MEM_WAIT: begin
+        pc_enable_o     = 1'b0;
+        if_id_enable_o  = 1'b0;
+        id_ex_enable_o  = 1'b0;
+        ex_mem_enable_o = 1'b0;
 
-      mem_wb_flush_o = 1'b1;
+        mem_wb_flush_o = 1'b1;
+      end
 
-    // An EX exception advances into EX/MEM while the two younger stages are
-    // squashed and fetch is stopped for precise trap draining.
-    end else if (ex_exception_i) begin
-      pc_enable_o = 1'b0;
+      // Advance the offending EX packet into EX/MEM and squash both younger
+      // pipeline entries before entering precise trap drain.
+      ACTION_EX_EXCEPTION: begin
+        pc_enable_o = 1'b0;
 
-      if_id_flush_o = 1'b1;
-      id_ex_flush_o = 1'b1;
+        if_id_flush_o = 1'b1;
+        id_ex_flush_o = 1'b1;
 
-      trap_drain_d = 1'b1;
+        trap_drain_d = 1'b1;
+      end
 
-    // A multi-cycle EX operation retains ID/EX. The older EX/MEM entry may
-    // advance, after which EX/MEM receives a bubble until the result is ready.
-    end else if (ex_wait_i) begin
-      pc_enable_o    = 1'b0;
-      if_id_enable_o = 1'b0;
-      id_ex_enable_o = 1'b0;
+      // Hold the current ID/EX operation while MUL/DIV is running or a valid EX
+      // result is backpressured. The older EX/MEM entry advances and is then
+      // replaced by a bubble until EX produces an accepted result.
+      ACTION_EX_WAIT: begin
+        pc_enable_o    = 1'b0;
+        if_id_enable_o = 1'b0;
+        id_ex_enable_o = 1'b0;
 
-      ex_mem_flush_o = 1'b1;
+        ex_mem_flush_o = 1'b1;
+      end
 
-    // Once a precise exception is draining, no younger redirect or ID event is
-    // allowed to restart the front end. Older MEM/EX waits and exceptions have
-    // already been handled by the higher-priority branches above.
-    end else if (trap_drain_q) begin
-      pc_enable_o    = 1'b0;
-      if_id_enable_o = 1'b0;
+      // No younger redirect or ID event may restart the front end while the
+      // oldest known exception is moving toward architectural commit.
+      ACTION_TRAP_DRAIN: begin
+        pc_enable_o    = 1'b0;
+        if_id_enable_o = 1'b0;
+      end
 
-    // A control transfer redirects only after its result has been accepted by
-    // the downstream stage. EX-origin redirects squash two younger packets; the
-    // future ID-origin option squashes only IF/ID so the control packet itself
-    // can enter ID/EX.
-    end else if (control_redirect_i.valid) begin
-      redirect_valid_o = 1'b1;
-      redirect_pc_o    = control_redirect_i.target;
-      if_id_flush_o    = 1'b1;
+      // EX redirects squash the two younger packets.  REDIRECT_FROM_ID remains
+      // in the stable contract for the documented post-baseline optimization.
+      ACTION_EX_REDIRECT: begin
+        redirect_valid_o = 1'b1;
+        redirect_pc_o    = control_redirect_i.target;
+        if_id_flush_o    = 1'b1;
 
-      unique case (control_redirect_i.origin)
-        REDIRECT_FROM_ID: id_ex_flush_o = 1'b0;
-        REDIRECT_FROM_EX: id_ex_flush_o = 1'b1;
-        default:          id_ex_flush_o = 1'b1;
-      endcase
+        unique case (control_redirect_i.origin)
+          REDIRECT_FROM_ID: id_ex_flush_o = 1'b0;
+          REDIRECT_FROM_EX: id_ex_flush_o = 1'b1;
+          default:          id_ex_flush_o = 1'b1;
+        endcase
+      end
 
-    // The faulting ID packet advances into ID/EX; only the younger fetch packet
-    // is discarded. Front-end issue remains stopped until WB takes the trap.
-    end else if (id_exception_i) begin
-      pc_enable_o   = 1'b0;
-      if_id_flush_o = 1'b1;
+      // The faulting ID packet advances into ID/EX; only the younger fetch
+      // packet is discarded before precise drain begins.
+      ACTION_ID_EXCEPTION: begin
+        pc_enable_o   = 1'b0;
+        if_id_flush_o = 1'b1;
 
-      trap_drain_d = 1'b1;
+        trap_drain_d = 1'b1;
+      end
 
-    // Load-use and CSR dependencies hold the producer/consumer boundary and
-    // inject exactly one bubble into ID/EX.
-    end else if (id_hazard) begin
-      pc_enable_o    = 1'b0;
-      if_id_enable_o = 1'b0;
+      // Hold PC and IF/ID while injecting exactly one bubble into ID/EX.
+      ACTION_ID_HAZARD: begin
+        pc_enable_o    = 1'b0;
+        if_id_enable_o = 1'b0;
+        id_ex_flush_o  = 1'b1;
+      end
 
-      id_ex_flush_o = 1'b1;
-    end
+      ACTION_ADVANCE: ;
+      default:        ;
+    endcase
   end
 
   always_ff @(posedge clk_i) begin
