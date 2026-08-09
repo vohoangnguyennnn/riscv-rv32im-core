@@ -6,7 +6,8 @@
 // tools can infer BRAM.
 module rv32_tcm #(
   parameter int unsigned   BYTES     = 64 * 1024,
-  parameter logic [31:0]   BASE_ADDR = 32'h0000_0000
+  parameter logic [31:0]   BASE_ADDR = 32'h0000_0000,
+  parameter string         INIT_FILE = ""
 ) (
   input logic clk_i,
   rv32_mem_if.slave imem_s,
@@ -19,6 +20,15 @@ module rv32_tcm #(
 
   (* ram_style = "block" *)
   logic [31:0] mem [0:WORD_COUNT-1];
+
+  // Vivado maps a constant readmemh file into BRAM INIT attributes. Leaving
+  // INIT_FILE empty preserves the uninitialized-memory behavior expected by
+  // ASIC flows and by testbenches that load the array explicitly.
+  initial begin
+    if (INIT_FILE != "") begin
+      $readmemh(INIT_FILE, mem);
+    end
+  end
 
   logic [32:0] imem_byte_offset;
   logic [32:0] dmem_byte_offset;
