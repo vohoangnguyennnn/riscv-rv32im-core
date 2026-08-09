@@ -417,6 +417,16 @@ module rv32_core #(
       id_ex_q <= '0;
     end else if (id_ex_enable) begin
       id_ex_q <= id_ex_d;
+    end else if (id_ex_q.valid && wb_reg_write) begin
+      // A MEM/MDU wait may hold this packet after its producer has advanced
+      // through MEM/WB. Preserve the architectural forwarding effect in the
+      // operand snapshot before that producer disappears from the mux inputs.
+      if (id_ex_q.ctrl.uses_rs1 && (id_ex_q.rs1 == mem_wb_q.rd)) begin
+        id_ex_q.rs1_value <= mem_wb_q.wb_data;
+      end
+      if (id_ex_q.ctrl.uses_rs2 && (id_ex_q.rs2 == mem_wb_q.rd)) begin
+        id_ex_q.rs2_value <= mem_wb_q.wb_data;
+      end
     end
   end
 
