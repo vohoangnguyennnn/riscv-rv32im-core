@@ -23,6 +23,7 @@ module alu (
       ALU_XOR:  result_o = a_i ^ b_i;
       ALU_OR:   result_o = a_i | b_i;
       ALU_AND:  result_o = a_i & b_i;
+      default:  result_o = 32'b0;
     endcase
   end
 
