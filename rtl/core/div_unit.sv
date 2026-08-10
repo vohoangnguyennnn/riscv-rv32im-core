@@ -77,12 +77,8 @@ module div_unit (
       quotient_next[0] = 1'b1;
     end
 
-    quotient_corrected = quotient_neg_q
-                       ? (~quotient_next + 32'd1)
-                       : quotient_next;
-    remainder_corrected = remainder_neg_q
-                        ? (~remainder_next + 32'd1)
-                        : remainder_next;
+    quotient_corrected = quotient_neg_q ? (~quotient_next + 32'd1) : quotient_next;
+    remainder_corrected = remainder_neg_q ? (~remainder_next + 32'd1) : remainder_next;
   end
 
   always_comb begin
