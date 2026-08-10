@@ -1,6 +1,7 @@
 interface rv32_mem_if;
 
-  // Request channel: master to slave.
+  // Request channel: master to slave. Addresses are byte addresses; the core
+  // drives word-aligned bus requests and uses byte strobes for sub-word stores.
   logic        req_valid;
   logic        req_ready;
   logic [31:0] req_addr;
@@ -8,7 +9,8 @@ interface rv32_mem_if;
   logic [31:0] req_wdata;
   logic [3:0]  req_wstrb;
 
-  // Response channel: slave to master.
+  // Response channel: slave to master. Stores also receive a response so an
+  // access fault is architecturally known before retirement.
   logic        rsp_valid;
   logic [31:0] rsp_rdata;
   logic        rsp_err;
