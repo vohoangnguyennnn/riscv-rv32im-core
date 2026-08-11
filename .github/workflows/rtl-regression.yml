@@ -1,0 +1,56 @@
+name: RTL regression
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rtl-regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verilator:
+    name: Verilator lint and simulation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install RTL and RISC-V tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            binutils-riscv64-unknown-elf \
+            gcc-riscv64-unknown-elf \
+            verilator
+
+      - name: Show tool versions
+        run: |
+          verilator --version
+          riscv64-unknown-elf-gcc --version | head -n 1
+          make --version | head -n 1
+
+      - name: Run RTL, software, and ISA regression
+        run: |
+          make -j"$(nproc)" \
+            ISA_TRACE_DIR="${RUNNER_TEMP}/isa-traces" \
+            test
+
+      - name: Upload ISA failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: isa-failure-diagnostics
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/isa-traces/
+            /tmp/rv32im-core-isa-*/*.elf
+            /tmp/rv32im-core-isa-*/*.map
+            /tmp/rv32im-core-isa-*/*.dump

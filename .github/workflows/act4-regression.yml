@@ -1,0 +1,91 @@
+name: ACT4 architectural regression
+
+on:
+  push:
+    paths:
+      - "rtl/**"
+      - "files/core.f"
+      - "tb/integration/tb_baremetal.sv"
+      - "tools/elf_to_memh.py"
+      - "verification/act4/**"
+      - "Makefile"
+      - ".github/workflows/act4-regression.yml"
+  pull_request:
+    paths:
+      - "rtl/**"
+      - "files/core.f"
+      - "tb/integration/tb_baremetal.sv"
+      - "tools/elf_to_memh.py"
+      - "verification/act4/**"
+      - "Makefile"
+      - ".github/workflows/act4-regression.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: act4-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rv32im:
+    name: ACT4 4.0.0 RV32I/RV32M
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install host, RTL, and RISC-V tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            binutils-riscv64-unknown-elf \
+            curl \
+            gcc-riscv64-unknown-elf \
+            unzip \
+            verilator
+
+      - name: Install mise
+        uses: jdx/mise-action@v4
+        with:
+          install: false
+          cache: true
+
+      - name: Install pinned Sail reference model
+        run: |
+          mkdir -p "${RUNNER_TEMP}/sail-riscv"
+          curl --fail --location --retry 3 --retry-all-errors \
+            https://github.com/riscv/sail-riscv/releases/download/0.10/sail-riscv-Linux-x86_64.tar.gz \
+            -o "${RUNNER_TEMP}/sail-riscv.tar.gz"
+          echo "cb66af6efb5d1ebb812cf19ca2156c2b1020881f08f16c40136da7e84af299ca  ${RUNNER_TEMP}/sail-riscv.tar.gz" \
+            | sha256sum -c -
+          tar xzf "${RUNNER_TEMP}/sail-riscv.tar.gz" \
+            --directory="${RUNNER_TEMP}/sail-riscv" \
+            --strip-components=1
+          echo "${RUNNER_TEMP}/sail-riscv/bin" >> "${GITHUB_PATH}"
+
+      - name: Show sign-off tool versions
+        run: |
+          verilator --version
+          riscv64-unknown-elf-gcc --version | head -n 1
+          sail_riscv_sim --version
+          mise --version
+
+      - name: Generate and run ACT4 on RTL
+        run: make act4
+
+      - name: Upload ACT4 failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: act4-failure-diagnostics
+          if-no-files-found: ignore
+          retention-days: 14
+          path: |
+            /tmp/rv32im-core-act4-*/rtl-artifacts/
+            /tmp/rv32im-core-act4-*/work/rv32im-5stage/elfs/
+            /tmp/rv32im-core-act4-*/work/rv32im-5stage/build/**/*.sig.log
+            /tmp/rv32im-core-act4-*/work/rv32im-5stage/build/**/*.sig.trace
