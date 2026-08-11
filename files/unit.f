@@ -1,4 +1,20 @@
+-f files/core.f
+rtl/soc/rv32_tcm.sv
+rtl/fpga/reset_sync.sv
 tb/unit/tb_alu.sv
 tb/unit/tb_imm_gen.sv
 tb/unit/tb_decoder.sv
 tb/unit/tb_branch_unit.sv
+tb/unit/tb_regfile.sv
+tb/unit/tb_reset_sync.sv
+tb/unit/tb_rv32_tcm.sv
+tb/unit/tb_lsu.sv
+tb/unit/tb_if_stage.sv
+tb/unit/tb_id_stage.sv
+tb/unit/tb_forwarding_unit.sv
+tb/unit/tb_hazard_unit.sv
+tb/unit/tb_mul_unit.sv
+tb/unit/tb_div_unit.sv
+tb/unit/tb_ex_stage.sv
+tb/unit/tb_pipeline_ctrl.sv
+tb/unit/tb_csr.sv
