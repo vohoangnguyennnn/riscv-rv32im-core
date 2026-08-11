@@ -76,10 +76,10 @@ freestanding C/assembly programs, a pinned upstream `riscv-tests` RV32I/RV32M
 suite, and the ACT4 4.0.0 I/M architectural suite using Sail as the reference
 model.
 
-FPGA synthesis, placement, and routing have also completed at 50 MHz in a local
-Vivado 2024.1 review run. Final board sign-off remains deliberately open until
-the Vivado part is matched to the exact device marking on the physical board
-and the bitstream is validated on hardware. The project does **not** claim
+FPGA synthesis, placement, routing, and bitstream generation have also
+completed at 50 MHz in a local Vivado 2024.1 review run targeting the confirmed
+`xc7a35tfgg484-2` device. Final board sign-off remains deliberately open until
+the bitstream is validated on hardware. The project does **not** claim
 official RISC-V certification or silicon validation.
 
 | Area | Current result |
@@ -477,8 +477,9 @@ not a claim of official RISC-V certification.
 </p>
 
 <p align="center"><em>MicroPhase A7-Lite development platform used for the
-FPGA implementation target. The exact populated FPGA marking must be verified
-before generating the final board bitstream.</em></p>
+FPGA implementation target. The populated device was confirmed as an
+XC7A35T-FGG484 speed-grade -2; on-board bitstream validation remains
+pending.</em></p>
 
 The A7-Lite R1.1 is a compact Xilinx Artix-7 development platform with an
 FGG484 FPGA footprint, on-board memory, programming/debug interfaces, user I/O,
@@ -489,7 +490,7 @@ only the resources listed as used are part of the current RV32IM integration.
 
 | Board resource | Datasheet capability | Use in this project |
 |---|---|---|
-| FPGA | Xilinx Artix-7 XC7A35T in an FGG484 package in the R1.1 reference design | Implements `fpga_top`, the RV32IM core, and the TCM subsystem |
+| FPGA | Xilinx Artix-7 XC7A35T-FGG484, speed grade -2 | Implements `fpga_top`, the RV32IM core, and the TCM subsystem |
 | System clock | 50 MHz single-ended oscillator | Drives `clk_50m_i` and the complete synchronous design |
 | User controls | Push buttons and two active-low green LEDs | K3 is the active-low reset; LED1 is heartbeat and LED2 indicates software PASS |
 | Expansion I/O | Two 50-pin GPIO headers | JP2 exports active-high FAIL and DONE status for an external LED or logic analyzer |
@@ -511,15 +512,15 @@ A7-Lite R1.1 platform:
 - heartbeat, PASS, FAIL, and DONE status outputs;
 - XDC pin, clock, voltage, I/O-standard, and timing-exception constraints.
 
-The latest reviewed local implementation snapshot used Vivado 2024.1 and part
-`xc7a35tfgg484-1`:
+The latest reviewed local implementation snapshot used Vivado 2024.1 and the
+confirmed board part `xc7a35tfgg484-2`:
 
 | Metric | Post-implementation result |
 |---|---:|
 | Clock target | 50 MHz / 20.000 ns |
-| Setup WNS / TNS | +0.772 ns / 0.000 ns |
-| Hold WHS / THS | +0.027 ns / 0.000 ns |
-| Slice LUTs | 2,879 / 20,800 (13.84%) |
+| Setup WNS / TNS | +3.382 ns / 0.000 ns |
+| Hold WHS / THS | +0.064 ns / 0.000 ns |
+| Slice LUTs | 2,881 / 20,800 (13.85%) |
 | Slice registers | 1,580 / 41,600 (3.80%) |
 | Block RAM tiles | 16 / 50 (32.00%) |
 | DSP48E1 blocks | 4 / 90 (4.44%) |
@@ -527,13 +528,11 @@ The latest reviewed local implementation snapshot used Vivado 2024.1 and part
 | Unconstrained internal endpoints | 0 |
 | Estimated on-chip power | 0.110 W, medium-confidence vectorless estimate |
 
-These values are engineering evidence, not final hardware characterization.
-The board documentation currently references an XC7A35T FGG484 `-2/-2L`
-device, whereas the reviewed run used speed grade `-1`. The exact package and
-speed grade must be read from the physical device, selected in Vivado, and
-reimplemented before claiming board sign-off. The current reports also contain
-advisory DSP-pipelining and BRAM byte-write-inference methodology warnings that
-should be reviewed before any Fmax or power-optimization claim.
+These values are post-route engineering evidence for the exact `-2` device, not
+final hardware characterization. The current reports contain advisory
+DSP-pipelining and BRAM byte-write-inference methodology warnings that should
+be reviewed before any Fmax or power-optimization claim. On-board programming
+and smoke-test evidence remain required before claiming hardware sign-off.
 
 ### Implementation evidence
 
@@ -548,7 +547,7 @@ should be reviewed before any Fmax or power-optimization claim.
 </p>
 
 <p align="center"><em>Post-route timing at the 50 MHz target: setup
-WNS +0.772 ns and hold WHS +0.027 ns, with no failing endpoints.</em></p>
+WNS +3.382 ns and hold WHS +0.064 ns, with no failing endpoints.</em></p>
 
 <p align="center">
   <a href="docs/images/utilization_report.png">
@@ -773,7 +772,7 @@ tool version, image hash, and observed heartbeat/PASS/FAIL/DONE behavior.
 | [ACT4 regression](docs/act4-regression.md) | Sail-backed architectural flow, pinned versions, configuration, and artifacts |
 | [SoC/TCM integration](docs/soc-tcm-top.md) | Core-memory boundary, parameters, mailbox, and retirement interface |
 | [FPGA bring-up](docs/fpga-bringup.md) | Reset contract, XDC, image flow, LED protocol, and board checklist |
-| [FPGA implementation status](docs/fpga-implementation-status.md) | Reviewed timing snapshot and remaining speed-grade/on-board checks |
+| [FPGA implementation status](docs/fpga-implementation-status.md) | Reviewed `-2` timing snapshot and remaining on-board validation |
 | [Questa waveform flow](docs/questa-waveform.md) | Curated debug portfolio and waveform evidence policy |
 | [Release checklist](docs/release-checklist.md) | Repository review, release tagging, and GitHub publication procedure |
 
@@ -794,7 +793,7 @@ SoC. The following features are intentionally not implemented:
 High-value future work includes retirement-level differential testing against
 Spike, constrained-random instruction generation, formal properties for
 pipeline control and memory protocols, functional/code coverage closure,
-cache/bus integration, and timing/power optimization after exact-board sign-off.
+cache/bus integration, timing/power optimization, and complete on-board sign-off.
 
 ## Engineering claims and reproducibility
 
@@ -807,8 +806,8 @@ interpreted as broader certification. In particular:
 - the selected CSR/trap implementation is not a complete privileged
   architecture implementation;
 - vectorless FPGA power is an estimate, not measured board power;
-- the existing `-1` implementation snapshot is not final evidence for a board
-  fitted with a `-2/-2L` device;
+- the routed `xc7a35tfgg484-2` implementation is timing evidence, not proof of
+  successful programming or execution on the physical board;
 - simulation and routed timing do not replace an on-board bitstream test.
 
 This claim discipline is intentional: the repository distinguishes implemented

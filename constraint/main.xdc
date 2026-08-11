@@ -4,7 +4,7 @@
 #   https://fpga-docs.microphase.cn/en/latest/DEV_BOARD/A7-LITE/A7-Lite_Reference_Manual.html
 #   https://github.com/MicroPhase/fpga-docs/blob/master/schematic/A7-LITE_R11.pdf
 #
-# Target package: Xilinx Artix-7 XC7A35T FGG484, speed grade -1
+# Target device: Xilinx Artix-7 XC7A35T FGG484, speed grade -2
 
 # The A7-Lite configuration interface uses a 3.3 V configuration bank. These
 # properties let Vivado validate bank-0 voltage compatibility and remove the
