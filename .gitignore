@@ -1,0 +1,39 @@
+# Verilator and waveform output
+/build/
+*.vcd
+*.fst
+
+# QuestaSim/ModelSim local products (the supported flow builds under /tmp)
+*.wlf
+modelsim.ini
+transcript
+/work/
+
+# Python helper caches
+__pycache__/
+*.py[cod]
+
+# FPGA tool output
+*.jou
+*.log
+*.str
+*.xpr
+*.cache/
+*.gen/
+*.hw/
+*.ip_user_files/
+*.runs/
+*.sim/
+/vivado_review_*/
+
+# Local editor/project metadata
+/.sigasi/
+/.ua/
+/.understand-anything/
+/project.sigasi
+/docs.txt
+/prompt.md
+/refs/riscv/
+/third_party/riscv-tests/isa/rv64ui/
+/third_party/riscv-tests/isa/rv64um/
+/third_party/riscv-arch-test/
