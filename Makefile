@@ -370,7 +370,8 @@ act4-check-tools:
 	}
 
 act4-fetch: act4-check-tools
-	@mkdir -p "$(ACT4_ROOT)"
+	@mkdir -p "$(ACT4_ROOT)" "$(ACT4_XDG_CACHE)" \
+		"$(ACT4_XDG_DATA)" "$(ACT4_XDG_STATE)"
 	@if [ ! -d "$(ACT4_SOURCE_DIR)/.git" ]; then \
 		echo "[ACT4 FETCH] release $(ACT4_VERSION)"; \
 		git clone --depth 1 --branch "$(ACT4_VERSION)" \
@@ -381,7 +382,10 @@ act4-fetch: act4-check-tools
 		echo "error: ACT4 source commit $$actual does not match pinned $(ACT4_COMMIT)" >&2; \
 		exit 2; \
 	fi
-	@mise trust "$(ACT4_SOURCE_DIR)/.mise.toml" >/dev/null
+	@XDG_CACHE_HOME="$(ACT4_XDG_CACHE)" \
+		XDG_DATA_HOME="$(ACT4_XDG_DATA)" \
+		XDG_STATE_HOME="$(ACT4_XDG_STATE)" \
+		mise trust "$(ACT4_SOURCE_DIR)/.mise.toml" >/dev/null
 
 act4-config:
 	@mkdir -p "$(ACT4_ROOT)"
