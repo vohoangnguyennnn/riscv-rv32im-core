@@ -1,0 +1,13 @@
+name: rv32im-5stage
+compiler_exe: riscv64-unknown-elf-gcc
+objdump_exe: riscv64-unknown-elf-objdump
+ref_model_exe: sail_riscv_sim
+ref_model_type: sail
+udb_config: rv32im-5stage.yaml
+linker_script: link.ld
+dut_include_dir: .
+
+# The RTL implements a deliberately small same-privilege M-mode environment,
+# not the complete Sm contract (mstatus, interrupts, PMP, U/S modes, ...).
+# Keep privileged ACTs disabled until that architectural scope is implemented.
+include_priv_tests: false

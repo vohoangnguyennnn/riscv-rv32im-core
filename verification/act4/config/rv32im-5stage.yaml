@@ -1,0 +1,76 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/riscv/riscv-unified-db/main/spec/schemas/config_schema.json
+---
+$schema: config_schema.json#
+kind: architecture configuration
+type: fully configured
+name: rv32im-5stage
+description: Single-hart RV32IM five-stage core; ACT4 I/M execution configuration
+
+# Zicsr and Sm describe the M-mode execution environment required by ACT4.
+# Privileged ACT4 tests remain disabled: this project only claims I/M results,
+# because the RTL intentionally implements a documented machine-mode subset
+# rather than every mandatory Sm CSR and state transition.
+implemented_extensions:
+  - { name: I, version: "= 2.1" }
+  - { name: M, version: "= 2.0" }
+  - { name: Zicsr, version: "= 2.0" }
+  - { name: Sm, version: "= 1.13.0" }
+
+params:
+  MXLEN: 32
+  MUTABLE_MISA_M: false
+
+  PRECISE_SYNCHRONOUS_EXCEPTIONS: true
+  TRAP_ON_ECALL_FROM_M: true
+  TRAP_ON_EBREAK: true
+  TRAP_ON_UNIMPLEMENTED_INSTRUCTION: true
+  TRAP_ON_RESERVED_INSTRUCTION: true
+  TRAP_ON_UNIMPLEMENTED_CSR: true
+  TRAP_ON_ILLEGAL_WLRL: false
+
+  MARCHID_IMPLEMENTED: false
+  MIMPID_IMPLEMENTED: false
+  VENDOR_ID_BANK: 0
+  VENDOR_ID_OFFSET: 0
+
+  MISALIGNED_LDST: false
+  MISALIGNED_LDST_EXCEPTION_PRIORITY: high
+
+  REPORT_VA_IN_MTVAL_ON_BREAKPOINT: true
+  REPORT_VA_IN_MTVAL_ON_LOAD_MISALIGNED: true
+  REPORT_VA_IN_MTVAL_ON_STORE_AMO_MISALIGNED: true
+  REPORT_VA_IN_MTVAL_ON_INSTRUCTION_MISALIGNED: true
+  REPORT_VA_IN_MTVAL_ON_LOAD_ACCESS_FAULT: true
+  REPORT_VA_IN_MTVAL_ON_STORE_AMO_ACCESS_FAULT: true
+  REPORT_VA_IN_MTVAL_ON_INSTRUCTION_ACCESS_FAULT: true
+  REPORT_ENCODING_IN_MTVAL_ON_ILLEGAL_INSTRUCTION: true
+  MTVAL_WIDTH: 32
+
+  CONFIG_PTR_ADDRESS: 0
+  PMA_GRANULARITY: 2
+  PHYS_ADDR_WIDTH: 32
+  M_MODE_ENDIANNESS: little
+  MISA_CSR_IMPLEMENTED: true
+
+  MTVEC_ACCESS: rw
+  MTVEC_MODES: [0]
+  MTVEC_BASE_ALIGNMENT_DIRECT: 4
+  MTVEC_ILLEGAL_WRITE_BEHAVIOR: custom
+
+  # mcountinhibit, mcounteren, and mhpmcounter3..31 are not implemented.
+  COUNTINHIBIT_EN:
+    [false, false, false, false, false, false, false, false,
+     false, false, false, false, false, false, false, false,
+     false, false, false, false, false, false, false, false,
+     false, false, false, false, false, false, false, false]
+  HPM_COUNTER_EN:
+    [false, false, false, false, false, false, false, false,
+     false, false, false, false, false, false, false, false,
+     false, false, false, false, false, false, false, false,
+     false, false, false, false, false, false, false, false]
+  MCOUNTENABLE_EN:
+    [false, false, false, false, false, false, false, false,
+     false, false, false, false, false, false, false, false,
+     false, false, false, false, false, false, false, false,
+     false, false, false, false, false, false, false, false]
+  NUM_PMP_ENTRIES: 0
