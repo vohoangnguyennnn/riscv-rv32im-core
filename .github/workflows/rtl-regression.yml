@@ -36,6 +36,25 @@ jobs:
           riscv64-unknown-elf-gcc --version | head -n 1
           make --version | head -n 1
 
+      # The vendored RV32 wrappers include their instruction bodies from the
+      # upstream rv64ui/rv64um directories. Those shared sources are excluded
+      # from this repository, so restore them at the snapshot's pinned commit.
+      - name: Restore pinned riscv-tests shared sources
+        env:
+          RISCV_TESTS_COMMIT: 447a5fcb8253627ddb5f6a226f64e43463afcdd5
+        run: |
+          git clone --filter=blob:none --no-checkout \
+            https://github.com/riscv-software-src/riscv-tests.git \
+            "${RUNNER_TEMP}/riscv-tests"
+          git -C "${RUNNER_TEMP}/riscv-tests" fetch --depth 1 origin \
+            "${RISCV_TESTS_COMMIT}"
+          git -C "${RUNNER_TEMP}/riscv-tests" checkout --detach \
+            "${RISCV_TESTS_COMMIT}"
+          cp -R "${RUNNER_TEMP}/riscv-tests/isa/rv64ui" \
+            third_party/riscv-tests/isa/
+          cp -R "${RUNNER_TEMP}/riscv-tests/isa/rv64um" \
+            third_party/riscv-tests/isa/
+
       - name: Run RTL, software, and ISA regression
         run: |
           make -j"$(nproc)" \
