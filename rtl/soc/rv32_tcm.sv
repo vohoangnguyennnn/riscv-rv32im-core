@@ -16,7 +16,7 @@ module rv32_tcm #(
 
   localparam int unsigned WORD_COUNT = BYTES / 4;
   localparam int unsigned INDEX_WIDTH = (WORD_COUNT > 1) ? $clog2(WORD_COUNT) : 1;
-  localparam logic [32:0] BYTE_COUNT = {1'b0, 32'(BYTES)};
+  localparam logic [32:0] BYTE_COUNT = 33'(BYTES);
 
   (* ram_style = "block" *)
   logic [31:0] mem [0:WORD_COUNT-1];
