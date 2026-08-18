@@ -174,10 +174,6 @@ module tb_soc_tcm_top;
         if (phase != 3) begin
           $fatal(1, "unexpected trap in phase %0d", phase);
         end
-        check_word(trace_pc, 32'h0000_0000, "illegal trap PC");
-        check_word(trace_insn, 32'hffff_ffff, "illegal trap instruction");
-        check_word({27'b0, trace_cause}, {27'b0, EXC_ILLEGAL_INSN}, "illegal trap cause");
-        saw_expected_trap = 1'b1;
       end
     end
   end
@@ -241,7 +237,13 @@ module tb_soc_tcm_top;
     for (int unsigned cycle = 0; cycle < MAX_CYCLES; cycle++) begin
       @(posedge clk);
       #1ps;
-      if (saw_expected_trap) break;
+      if (trace_valid && trace_trap) begin
+        check_word(trace_pc, 32'h0000_0000, "illegal trap PC");
+        check_word(trace_insn, 32'hffff_ffff, "illegal trap instruction");
+        check_word({27'b0, trace_cause}, {27'b0, EXC_ILLEGAL_INSN}, "illegal trap cause");
+        saw_expected_trap = 1'b1;
+        break;
+      end
     end
     check_bit(saw_expected_trap, 1'b1, "top-level illegal trap observed");
     check_bit(test_done, 1'b0, "trap does not complete test");
