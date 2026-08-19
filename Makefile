@@ -362,7 +362,8 @@ act4-check-tools:
 		Linux/x86_64) ;; \
 		*) echo "error: the pinned ACT4 Z3 bootstrap currently supports Linux/x86_64" >&2; exit 2 ;; \
 	esac
-	@riscv64-unknown-elf-gcc -dumpmachine | grep -q '^riscv64-unknown-elf$$' || { \
+	@riscv64-unknown-elf-gcc -dumpmachine \
+		| grep -Eq '^(riscv64-unknown-elf|riscv-none-elf)$$' || { \
 		echo "error: unexpected RISC-V bare-metal compiler target" >&2; exit 2; \
 	}
 	@sail_riscv_sim --version 2>&1 | grep -q '0\.10' || { \
