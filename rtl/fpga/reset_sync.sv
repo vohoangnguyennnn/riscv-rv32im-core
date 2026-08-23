@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 // Asynchronous reset-event synchronizer followed by a fully synchronous
 // functional reset.

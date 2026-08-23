@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 // Minimal machine-mode CSR state for the RV32IM core.
 //
