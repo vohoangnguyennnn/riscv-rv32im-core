@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 // RV32IM + Zicsr execute-stage datapath and control-transfer resolver.
 //
@@ -338,7 +337,6 @@ module ex_stage (
     if (ex_fire && is_control && control_taken && !ex_mem_d.exc.valid) begin
       control_redirect_d.valid  = 1'b1;
       control_redirect_d.target = control_target;
-      control_redirect_d.origin = REDIRECT_FROM_EX;
     end
   end
 

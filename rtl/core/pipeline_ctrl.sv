@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 // Centralized control for the RV32IM five-stage pipeline.
 //
@@ -190,18 +189,12 @@ module pipeline_ctrl (
         if_id_enable_o = 1'b0;
       end
 
-      // EX redirects squash the two younger packets.  REDIRECT_FROM_ID remains
-      // in the stable contract for the documented post-baseline optimization.
+      // EX redirects squash the two younger packets.
       ACTION_EX_REDIRECT: begin
         redirect_valid_o = 1'b1;
         redirect_pc_o    = control_redirect_i.target;
         if_id_flush_o    = 1'b1;
-
-        unique case (control_redirect_i.origin)
-          REDIRECT_FROM_ID: id_ex_flush_o = 1'b0;
-          REDIRECT_FROM_EX: id_ex_flush_o = 1'b1;
-          default:          id_ex_flush_o = 1'b1;
-        endcase
+        id_ex_flush_o    = 1'b1;
       end
 
       // The faulting ID packet advances into ID/EX; only the younger fetch

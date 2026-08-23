@@ -206,15 +206,9 @@ package rv32_pkg;
   } exc_cause_e;
 
   // Shared control and pipeline bundles
-  typedef enum logic {
-    REDIRECT_FROM_ID,
-    REDIRECT_FROM_EX
-  } redirect_origin_e;
-
   typedef struct packed {
-    logic             valid;
-    word_t            target;
-    redirect_origin_e origin;
+    logic  valid;
+    word_t target;
   } redirect_t;
 
   typedef struct packed {
