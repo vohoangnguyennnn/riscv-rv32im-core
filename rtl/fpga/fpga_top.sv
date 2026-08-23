@@ -1,10 +1,10 @@
-// SPDX-License-Identifier: MIT
 
 // MicroPhase A7-Lite R1.1 top for the TCM-based RV32IM SoC.
 //
-// The board supplies a 50 MHz clock directly on clk_50m_i. Its two on-board
-// green LEDs are wired active-low, while FAIL/DONE are routed active-high to
-// JP2 for an external indicator or logic analyzer.
+// The board supplies a 50 MHz clock on clk_50m_i. A Clocking Wizard generates
+// the 75 MHz SoC clock. Its two on-board green LEDs are wired active-low, while
+// FAIL/DONE are routed active-high to JP2 for an external indicator or logic
+// analyzer.
 module fpga_top #(
   parameter logic [31:0] RESET_VECTOR      = 32'h0000_0000,
   parameter logic [31:0] TRAP_VECTOR       = 32'h0000_0100,
@@ -24,6 +24,9 @@ module fpga_top #(
   output logic done_o
 );
 
+  logic clk_75m;
+  logic clk_locked;
+  logic clock_reset_ni;
   logic soc_rst;
   logic test_done;
   logic test_pass;
@@ -31,16 +34,25 @@ module fpga_top #(
   logic [HEARTBEAT_WIDTH-1:0] heartbeat_q;
   logic heartbeat;
 
+  clk_wiz_0 u_clk_wiz (
+    .clk_in1  (clk_50m_i),
+    .reset    (~reset_ni),
+    .clk_out1 (clk_75m),
+    .locked   (clk_locked)
+  );
+
+  assign clock_reset_ni = reset_ni && clk_locked;
+
   reset_sync #(
     .STAGES (RESET_SYNC_STAGES)
   ) u_reset_sync (
-    .clk_i   (clk_50m_i),
-    .arst_ni (reset_ni),
+    .clk_i   (clk_75m),
+    .arst_ni (clock_reset_ni),
     .rst_o   (soc_rst)
   );
 
   // Stop the heartbeat at completion so the visible result is stable.
-  always_ff @(posedge clk_50m_i) begin
+  always_ff @(posedge clk_75m) begin
     if (soc_rst || test_done) begin
       heartbeat_q <= '0;
     end else begin
@@ -75,7 +87,7 @@ module fpga_top #(
     .TEST_STATUS_ADDR  (TEST_STATUS_ADDR),
     .TEST_PASS_VALUE   (TEST_PASS_VALUE)
   ) u_soc (
-    .clk_i              (clk_50m_i),
+    .clk_i              (clk_75m),
     .rst_i              (soc_rst),
     .test_done_o        (test_done),
     .test_pass_o        (test_pass),
@@ -94,7 +106,15 @@ module fpga_top #(
     .trace_cause_o      (),
     .trace_control_o    (),
     .trace_taken_o      (),
-    .trace_target_o     ()
+    .trace_target_o     (),
+    .perf_cycle_o          (),
+    .perf_instret_o        (),
+    .perf_load_use_stall_o (),
+    .perf_csr_stall_o      (),
+    .perf_mdu_stall_o      (),
+    .perf_mem_stall_o      (),
+    .perf_redirect_o       (),
+    .perf_squash_o         ()
   );
 
 endmodule
