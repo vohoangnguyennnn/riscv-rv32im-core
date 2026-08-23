@@ -1,9 +1,6 @@
-// Blocking instruction-fetch front end with a one-entry fall-through buffer.
-//
-// At most one instruction-memory request is accepted without a matching
-// response.  A request that encounters backpressure remains stable until it is
-// accepted.  Responses bypass the buffer when the downstream pipeline consumes
-// them immediately; otherwise they are held until consumed or flushed.
+// Instruction fetch optimized for the always-ready, one-cycle TCM.
+// A single outstanding request and one output holding register are sufficient;
+// the small stale tag drains a request invalidated by flush or redirect.
 module if_stage #(
   parameter logic [31:0] RESET_VECTOR = 32'h0000_0000
 ) (
@@ -25,34 +22,25 @@ module if_stage #(
 
   import rv32_pkg::*;
 
-  typedef enum logic [1:0] {
+  typedef enum logic {
     IF_IDLE,
-    IF_REQ,
-    IF_WAIT
+    IF_BUSY
   } if_state_e;
 
   if_state_e state_q;
   if_state_e state_d;
 
-  // Address of the next architecturally useful fetch.  A redirect overwrites
-  // this value, while an accepted non-stale request advances it by four.
-  word_t fetch_pc_q;
-  word_t fetch_pc_d;
-
-  // PC and stale tag for the request held in IF_REQ or outstanding in IF_WAIT.
+  word_t next_pc_q;
+  word_t next_pc_d;
   word_t request_pc_q;
   word_t request_pc_d;
+  logic  request_sent_q;
+  logic  request_sent_d;
   logic  discard_q;
   logic  discard_d;
+  logic  redirect_pending_q;
+  logic  redirect_pending_d;
 
-  // A redirect can arrive while an older request must still be drained.  Keep
-  // the redirect pending so the target is issued as soon as the port is free,
-  // even though redirect_valid_i itself is only a one-cycle event.
-  logic redirect_pending_q;
-  logic redirect_pending_d;
-
-  // One-entry response skid buffer.  Normal TCM responses fall through to the
-  // outputs; this storage is used only when the downstream stage cannot accept.
   logic  packet_valid_q;
   logic  packet_valid_d;
   word_t packet_pc_q;
@@ -63,8 +51,10 @@ module if_stage #(
   exc_t  packet_exc_d;
 
   logic  kill_event;
+  logic  want_fetch;
   logic  launch_request;
   word_t launch_pc;
+  logic  held_request;
   logic  request_fire;
   logic  request_stale;
 
@@ -74,13 +64,14 @@ module if_stage #(
   word_t response_pc;
   word_t response_insn;
   exc_t  response_exc;
-  logic  response_consumed;
   logic  packet_consumed;
+  logic  response_consumed;
 
   always_comb begin
     state_d            = state_q;
-    fetch_pc_d         = fetch_pc_q;
+    next_pc_d          = next_pc_q;
     request_pc_d       = request_pc_q;
+    request_sent_d     = request_sent_q;
     discard_d          = discard_q;
     redirect_pending_d = redirect_pending_q;
 
@@ -90,10 +81,10 @@ module if_stage #(
     packet_exc_d       = packet_exc_q;
 
     kill_event         = flush_i || redirect_valid_i;
+    want_fetch         = redirect_valid_i || (!flush_i && (enable_i || redirect_pending_q));
     launch_request     = 1'b0;
-    launch_pc          = fetch_pc_q;
-    request_fire       = 1'b0;
-    request_stale      = discard_q || kill_event;
+    launch_pc          = redirect_valid_i ? redirect_pc_i : next_pc_q;
+    held_request       = (state_q == IF_BUSY) && !request_sent_q;
 
     response_seen      = 1'b0;
     response_stale     = 1'b0;
@@ -101,8 +92,8 @@ module if_stage #(
     response_pc        = request_pc_q;
     response_insn      = 32'b0;
     response_exc       = '0;
-    response_consumed  = 1'b0;
     packet_consumed    = 1'b0;
+    response_consumed  = 1'b0;
 
     fetch_valid_o      = 1'b0;
     fetch_pc_o         = 32'b0;
@@ -110,47 +101,23 @@ module if_stage #(
     fetch_exc_o        = '0;
 
     imem_m.req_valid   = 1'b0;
-    imem_m.req_addr    = fetch_pc_q;
+    imem_m.req_addr    = held_request ? request_pc_q : launch_pc;
     imem_m.req_write   = 1'b0;
     imem_m.req_wdata   = 32'b0;
     imem_m.req_wstrb   = 4'b0000;
 
-    // Decide whether a free request slot may be recycled this cycle.  A live
-    // response must either be consumed immediately or have buffer space; a
-    // stale response consumes no front-end storage.
-    if (!rst_i) begin
-      unique case (state_q)
-        IF_IDLE: begin
-          if (redirect_valid_i) begin
-            launch_request = 1'b1;
-            launch_pc      = redirect_pc_i;
-          end else if (!flush_i && (enable_i || redirect_pending_q) && (!packet_valid_q || consume_i)) begin
-            launch_request = 1'b1;
-            launch_pc      = fetch_pc_q;
-          end
-        end
-
-        IF_WAIT: begin
-          if (imem_m.rsp_valid) begin
-            if (redirect_valid_i) begin
-              launch_request = 1'b1;
-              launch_pc      = redirect_pc_i;
-            end else if (!flush_i && (enable_i || redirect_pending_q) && !packet_valid_q && (discard_q || consume_i)
-            ) begin
-              launch_request = 1'b1;
-              launch_pc      = fetch_pc_q;
-            end
-          end
-        end
-
-        default: ;
-      endcase
+    // IDLE starts a fetch when the output slot is free. A completed stale or
+    // immediately consumed response can recycle the request slot in one cycle.
+    if (!rst_i && want_fetch) begin
+      if (state_q == IF_IDLE) begin
+        launch_request = kill_event || !packet_valid_q || consume_i;
+      end else if (request_sent_q && imem_m.rsp_valid) begin
+        launch_request = redirect_valid_i || (!flush_i && !packet_valid_q && (discard_q || consume_i));
+      end
     end
 
-    // IF_REQ owns the request channel until ready.  In IDLE, or while an old
-    // response retires in IF_WAIT, launch_request may use the channel directly.
     if (!rst_i) begin
-      if (state_q == IF_REQ) begin
+      if (held_request) begin
         imem_m.req_valid = 1'b1;
         imem_m.req_addr  = request_pc_q;
       end else if (launch_request) begin
@@ -159,37 +126,22 @@ module if_stage #(
       end
     end
 
-    request_fire = imem_m.req_valid && imem_m.req_ready;
+    request_fire  = imem_m.req_valid && imem_m.req_ready;
+    request_stale = discard_q || kill_event;
 
-    // Associate every response with the PC captured for its request.  IF_IDLE
-    // and IF_REQ also support a zero-latency test slave; the project TCM uses a
-    // registered one-cycle response.
-    unique case (state_q)
-      IF_IDLE: begin
-        response_seen  = request_fire && imem_m.rsp_valid;
-        response_pc    = launch_pc;
-        response_stale = 1'b0;
-      end
-
-      IF_REQ: begin
-        response_seen  = request_fire && imem_m.rsp_valid;
-        response_pc    = request_pc_q;
-        response_stale = request_stale;
-      end
-
-      IF_WAIT: begin
-        response_seen  = imem_m.rsp_valid;
-        response_pc    = request_pc_q;
-        response_stale = request_stale;
-      end
-
-      default: ;
-    endcase
+    if (state_q == IF_BUSY) begin
+      response_seen  = imem_m.rsp_valid && (request_sent_q || request_fire);
+      response_pc    = request_pc_q;
+      response_stale = request_stale;
+    end else begin
+      response_seen  = launch_request && request_fire && imem_m.rsp_valid;
+      response_pc    = launch_pc;
+      response_stale = 1'b0;
+    end
 
     response_live = response_seen && !response_stale;
     if (response_live) begin
       if (imem_m.rsp_err) begin
-        response_insn      = 32'b0;
         response_exc.valid = 1'b1;
         response_exc.cause = EXC_INST_ACCESS_FAULT;
         response_exc.tval  = response_pc;
@@ -198,8 +150,8 @@ module if_stage #(
       end
     end
 
-    // The buffered packet has priority over a fall-through response.  Redirect
-    // and flush suppress all pre-existing packets in the cycle they occur.
+    // A held packet has priority. A response falls through when possible and
+    // is captured only when the pipeline does not consume it immediately.
     if (!rst_i && !kill_event) begin
       if (packet_valid_q) begin
         fetch_valid_o = 1'b1;
@@ -214,11 +166,9 @@ module if_stage #(
       end
     end
 
-    packet_consumed = packet_valid_q && !kill_event && consume_i;
+    packet_consumed   = packet_valid_q && !kill_event && consume_i;
     response_consumed = response_live && !packet_valid_q && !kill_event && consume_i;
 
-    // A kill first invalidates the old buffered packet.  A fresh zero-latency
-    // redirect response may then occupy the newly freed entry.
     if (kill_event || packet_consumed) begin
       packet_valid_d = 1'b0;
     end
@@ -230,11 +180,10 @@ module if_stage #(
       packet_exc_d   = response_exc;
     end
 
-    // Redirect is locally higher priority than flush.  A pure flush cancels a
-    // remembered redirect; the system controller will provide the eventual
-    // trap redirect after the precise-exception drain.
+    // The newest redirect target is the next useful PC. A pure flush cancels
+    // any remembered redirect while an older request drains.
     if (redirect_valid_i) begin
-      fetch_pc_d         = redirect_pc_i;
+      next_pc_d          = redirect_pc_i;
       redirect_pending_d = 1'b1;
     end else if (flush_i) begin
       redirect_pending_d = 1'b0;
@@ -242,74 +191,69 @@ module if_stage #(
 
     unique case (state_q)
       IF_IDLE: begin
-        discard_d = 1'b0;
+        discard_d      = 1'b0;
+        request_sent_d = 1'b0;
 
         if (launch_request) begin
           request_pc_d = launch_pc;
-          discard_d    = 1'b0;
 
           if (request_fire) begin
-            fetch_pc_d         = launch_pc + 32'd4;
+            next_pc_d          = launch_pc + 32'd4;
             redirect_pending_d = 1'b0;
 
-            if (imem_m.rsp_valid) begin
-              state_d = IF_IDLE;
-            end else begin
-              state_d = IF_WAIT;
+            if (!imem_m.rsp_valid) begin
+              state_d        = IF_BUSY;
+              request_sent_d = 1'b1;
             end
           end else begin
-            state_d = IF_REQ;
+            state_d        = IF_BUSY;
+            request_sent_d = 1'b0;
           end
         end
       end
 
-      IF_REQ: begin
+      IF_BUSY: begin
         if (kill_event) begin
           discard_d = 1'b1;
         end
 
-        if (request_fire) begin
+        if (!request_sent_q && request_fire) begin
           if (!request_stale) begin
-            fetch_pc_d         = request_pc_q + 32'd4;
+            next_pc_d          = request_pc_q + 32'd4;
             redirect_pending_d = 1'b0;
           end
 
           if (imem_m.rsp_valid) begin
-            state_d   = IF_IDLE;
-            discard_d = 1'b0;
+            state_d        = IF_IDLE;
+            request_sent_d = 1'b0;
+            discard_d      = 1'b0;
           end else begin
-            state_d   = IF_WAIT;
-            discard_d = request_stale;
+            request_sent_d = 1'b1;
+            discard_d      = request_stale;
           end
-        end
-      end
-
-      IF_WAIT: begin
-        if (kill_event) begin
-          discard_d = 1'b1;
-        end
-
-        if (imem_m.rsp_valid) begin
-          discard_d = 1'b0;
+        end else if (request_sent_q && imem_m.rsp_valid) begin
+          state_d        = IF_IDLE;
+          request_sent_d = 1'b0;
+          discard_d      = 1'b0;
 
           if (launch_request) begin
             request_pc_d = launch_pc;
+            state_d      = IF_BUSY;
 
             if (request_fire) begin
-              state_d            = IF_WAIT;
-              fetch_pc_d         = launch_pc + 32'd4;
+              request_sent_d     = 1'b1;
+              next_pc_d          = launch_pc + 32'd4;
               redirect_pending_d = 1'b0;
             end else begin
-              state_d = IF_REQ;
+              request_sent_d = 1'b0;
             end
-          end else begin
-            state_d = IF_IDLE;
           end
         end
       end
 
       default: begin
         state_d            = IF_IDLE;
+        request_sent_d     = 1'b0;
         discard_d          = 1'b0;
         redirect_pending_d = 1'b0;
         packet_valid_d     = 1'b0;
@@ -320,30 +264,30 @@ module if_stage #(
   always_ff @(posedge clk_i) begin
     if (rst_i) begin
       state_q            <= IF_IDLE;
-      fetch_pc_q         <= RESET_VECTOR;
+      next_pc_q          <= RESET_VECTOR;
       request_pc_q       <= RESET_VECTOR;
+      request_sent_q     <= 1'b0;
       discard_q          <= 1'b0;
       redirect_pending_q <= 1'b0;
-
       packet_valid_q     <= 1'b0;
       packet_pc_q        <= 32'b0;
       packet_insn_q      <= 32'b0;
       packet_exc_q       <= '0;
 
-      // The memory interface has no request cancellation.  Preserve only the
-      // fact that a pre-reset accepted request still needs to be drained; its
-      // eventual response remains stale, and fetching restarts at RESET_VECTOR.
-      if ((state_q == IF_WAIT) && !imem_m.rsp_valid) begin
-        state_q   <= IF_WAIT;
-        discard_q <= 1'b1;
+      // A request accepted before reset cannot be cancelled. Drain its single
+      // response before restarting from RESET_VECTOR.
+      if ((state_q == IF_BUSY) && request_sent_q && !imem_m.rsp_valid) begin
+        state_q        <= IF_BUSY;
+        request_sent_q <= 1'b1;
+        discard_q      <= 1'b1;
       end
     end else begin
       state_q            <= state_d;
-      fetch_pc_q         <= fetch_pc_d;
+      next_pc_q          <= next_pc_d;
       request_pc_q       <= request_pc_d;
+      request_sent_q     <= request_sent_d;
       discard_q          <= discard_d;
       redirect_pending_q <= redirect_pending_d;
-
       packet_valid_q     <= packet_valid_d;
       packet_pc_q        <= packet_pc_d;
       packet_insn_q      <= packet_insn_d;
