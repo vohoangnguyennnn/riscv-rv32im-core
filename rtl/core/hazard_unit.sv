@@ -3,9 +3,9 @@
 // The baseline pipeline needs one data interlock: a load in ID/EX cannot
 // provide its value to the immediately following consumer.  All other GPR RAW
 // dependencies are handled by EX forwarding.  CSR writes commit in WB, so a
-// CSR reader in ID is serialized behind writers in ID/EX and EX/MEM.  A writer
-// already in MEM/WB commits on the same edge that advances the reader to EX and
-// therefore does not require another stall.
+// CSR reader in ID is serialized behind conflicting writers in ID/EX and
+// EX/MEM. A writer already in MEM/WB commits on the same edge that advances the
+// reader to EX and therefore does not require another stall.
 module hazard_unit (
   input  logic                         id_valid_i,
   input  logic [4:0]                   id_rs1_i,
@@ -64,6 +64,32 @@ module hazard_unit (
     end
   endfunction
 
+  // The RV32 low/high views of a 64-bit counter share one architectural state
+  // object. Treat both halves as aliases: a write to one half suppresses the
+  // counter's implicit update on its commit edge and can therefore affect the
+  // other half on a carry boundary. All other implemented CSRs conflict only
+  // on an exact address match.
+  function automatic logic csr_addresses_conflict(
+    input csr_addr_t consumer,
+    input csr_addr_t producer
+  );
+    begin
+      unique case (consumer)
+        CSR_MCYCLE,
+        CSR_MCYCLEH: begin
+          csr_addresses_conflict = (producer == CSR_MCYCLE) || (producer == CSR_MCYCLEH);
+        end
+
+        CSR_MINSTRET,
+        CSR_MINSTRETH: begin
+          csr_addresses_conflict = (producer == CSR_MINSTRET) || (producer == CSR_MINSTRETH);
+        end
+
+        default: csr_addresses_conflict = (consumer == producer);
+      endcase
+    end
+  endfunction
+
   always_comb begin
     id_ex_is_load = id_ex_i.valid && !id_ex_i.exc.valid && id_ex_i.ctrl.reg_write && (id_ex_i.ctrl.mem_cmd == MEM_LOAD);
 
@@ -88,10 +114,15 @@ module hazard_unit (
 
     ex_mem_csr_writer = ex_mem_i.valid && !ex_mem_i.exc.valid && ex_mem_i.csr_write;
 
-    // Baseline CSR serialization is intentionally conservative: any older
-    // uncommitted CSR write stalls a CSR instruction in ID, regardless of CSR
-    // address.  This avoids a second address-compare path in decode.
-    csr_dependency = id_valid_i && (id_ctrl_i.csr_cmd != CSR_NONE) && (id_ex_csr_writer || ex_mem_csr_writer);
+    // Only an older writer to the same architectural CSR state blocks a
+    // general CSR instruction. This removes false dependencies such as an
+    // mtvec access behind an mscratch write without weakening RAW ordering.
+    csr_dependency = id_valid_i
+                   && (id_ctrl_i.csr_cmd != CSR_NONE)
+                   && ((id_ex_csr_writer
+                        && csr_addresses_conflict(id_csr_addr_i, id_ex_i.insn[31:20]))
+                       || (ex_mem_csr_writer
+                           && csr_addresses_conflict(id_csr_addr_i, ex_mem_i.csr_addr)));
 
     // MRET reads only mepc.  Unlike a general CSR instruction, it needs to
     // wait only for an older writer targeting that exact CSR.
