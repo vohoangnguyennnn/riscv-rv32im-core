@@ -43,6 +43,7 @@ module div_unit (
   logic        input_is_div;
   logic        input_divide_by_zero;
   logic        input_signed_overflow;
+  logic        input_small_magnitude;
   logic [31:0] input_lhs_magnitude;
   logic [31:0] input_rhs_magnitude;
 
@@ -62,6 +63,7 @@ module div_unit (
 
     input_lhs_magnitude = (input_signed && lhs_i[31]) ? (~lhs_i + 32'd1) : lhs_i;
     input_rhs_magnitude = (input_signed && rhs_i[31]) ? (~rhs_i + 32'd1) : rhs_i;
+    input_small_magnitude = (input_lhs_magnitude < input_rhs_magnitude) && !input_divide_by_zero && !input_signed_overflow;
   end
 
   // One restoring-division step. quotient_q initially holds the dividend
@@ -125,6 +127,9 @@ module div_unit (
               state_q  <= DIV_RESP;
             end else if (input_signed_overflow) begin
               result_q <= input_is_div ? 32'h8000_0000 : 32'b0;
+              state_q  <= DIV_RESP;
+            end else if (input_small_magnitude) begin
+              result_q <= input_is_div ? 32'b0 : lhs_i;
               state_q  <= DIV_RESP;
             end else begin
               divisor_q       <= input_rhs_magnitude;
