@@ -34,7 +34,15 @@ module soc_tcm_top #(
   output logic [4:0]  trace_cause_o,
   output logic        trace_control_o,
   output logic        trace_taken_o,
-  output logic [31:0] trace_target_o
+  output logic [31:0] trace_target_o,
+  output logic [63:0] perf_cycle_o,
+  output logic [63:0] perf_instret_o,
+  output logic [63:0] perf_load_use_stall_o,
+  output logic [63:0] perf_csr_stall_o,
+  output logic [63:0] perf_mdu_stall_o,
+  output logic [63:0] perf_mem_stall_o,
+  output logic [63:0] perf_redirect_o,
+  output logic [63:0] perf_squash_o
 );
 
   rv32_mem_if imem();
@@ -80,7 +88,15 @@ module soc_tcm_top #(
     .trace_cause_o      (trace_cause_o),
     .trace_control_o    (trace_control_o),
     .trace_taken_o      (trace_taken_o),
-    .trace_target_o     (trace_target_o)
+    .trace_target_o     (trace_target_o),
+    .perf_cycle_o          (perf_cycle_o),
+    .perf_instret_o        (perf_instret_o),
+    .perf_load_use_stall_o (perf_load_use_stall_o),
+    .perf_csr_stall_o      (perf_csr_stall_o),
+    .perf_mdu_stall_o      (perf_mdu_stall_o),
+    .perf_mem_stall_o      (perf_mem_stall_o),
+    .perf_redirect_o       (perf_redirect_o),
+    .perf_squash_o         (perf_squash_o)
   );
 
   rv32_tcm #(

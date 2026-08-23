@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 // RV32IM five-stage pipeline integration.
 //
@@ -29,7 +28,18 @@ module rv32_core #(
   output logic [4:0]  trace_cause_o,
   output logic        trace_control_o,
   output logic        trace_taken_o,
-  output logic [31:0] trace_target_o
+  output logic [31:0] trace_target_o,
+
+  // Read-only implementation-performance observability. These counters do
+  // not feed pipeline control or architectural state.
+  output logic [63:0] perf_cycle_o,
+  output logic [63:0] perf_instret_o,
+  output logic [63:0] perf_load_use_stall_o,
+  output logic [63:0] perf_csr_stall_o,
+  output logic [63:0] perf_mdu_stall_o,
+  output logic [63:0] perf_mem_stall_o,
+  output logic [63:0] perf_redirect_o,
+  output logic [63:0] perf_squash_o
 );
 
   import rv32_pkg::*;
@@ -81,6 +91,12 @@ module rv32_core #(
   word_t    mem_wb_fwd_value;
   logic     load_use_hazard;
   logic     csr_dependency;
+  logic     trap_drain;
+
+  logic effective_load_use_stall;
+  logic effective_csr_stall;
+  logic effective_mdu_stall;
+  logic effective_mem_stall;
 
   // --------------------------------------------------------------------------
   // WB/architectural commit
@@ -100,6 +116,64 @@ module rv32_core #(
   assign wb_retire    = mem_wb_q.valid && !mem_wb_q.exc.valid;
   assign wb_reg_write = wb_retire && mem_wb_q.reg_write && (mem_wb_q.rd != 5'd0);
   assign wb_csr_write = wb_retire && mem_wb_q.csr_write;
+
+  // Match the centralized controller's age-priority selection so stall
+  // categories are mutually exclusive. Exception/trap drain cycles are not
+  // benchmark stalls and therefore remain outside this breakdown.
+  assign effective_mem_stall = mem_wait && !wb_trap && !mem_exception;
+  assign effective_mdu_stall = ex_wait
+                             && (id_ex_q.ctrl.mdu_op != MDU_NONE)
+                             && !wb_trap
+                             && !mem_exception
+                             && !mem_wait
+                             && !ex_exception;
+  assign effective_load_use_stall = load_use_hazard
+                                  && !wb_trap
+                                  && !mem_exception
+                                  && !mem_wait
+                                  && !ex_exception
+                                  && !ex_wait
+                                  && !trap_drain
+                                  && !control_redirect.valid
+                                  && !id_exception;
+  assign effective_csr_stall = csr_dependency
+                             && !load_use_hazard
+                             && !wb_trap
+                             && !mem_exception
+                             && !mem_wait
+                             && !ex_exception
+                             && !ex_wait
+                             && !trap_drain
+                             && !control_redirect.valid
+                             && !id_exception;
+
+  always_ff @(posedge clk_i) begin
+    if (rst_i) begin
+      perf_cycle_o          <= 64'b0;
+      perf_instret_o        <= 64'b0;
+      perf_load_use_stall_o <= 64'b0;
+      perf_csr_stall_o      <= 64'b0;
+      perf_mdu_stall_o      <= 64'b0;
+      perf_mem_stall_o      <= 64'b0;
+      perf_redirect_o       <= 64'b0;
+      perf_squash_o         <= 64'b0;
+    end else begin
+      perf_cycle_o <= perf_cycle_o + 64'd1;
+
+      if (wb_retire)                 perf_instret_o        <= perf_instret_o + 64'd1;
+      if (effective_load_use_stall)  perf_load_use_stall_o <= perf_load_use_stall_o + 64'd1;
+      if (effective_csr_stall)       perf_csr_stall_o      <= perf_csr_stall_o + 64'd1;
+      if (effective_mdu_stall)       perf_mdu_stall_o      <= perf_mdu_stall_o + 64'd1;
+      if (effective_mem_stall)       perf_mem_stall_o      <= perf_mem_stall_o + 64'd1;
+
+      if (control_redirect.valid) begin
+        perf_redirect_o <= perf_redirect_o + 64'd1;
+        perf_squash_o   <= perf_squash_o
+                         + {63'b0, if_id_q.valid}
+                         + {63'b0, fetch_valid};
+      end
+    end
+  end
 
   csr_file #(
     .TRAP_VECTOR (TRAP_VECTOR)
@@ -394,7 +468,7 @@ module rv32_core #(
     .mem_wb_flush_o       (mem_wb_flush),
     .redirect_valid_o     (redirect_valid),
     .redirect_pc_o        (redirect_pc),
-    .trap_drain_o         ()
+    .trap_drain_o         (trap_drain)
   );
 
   // --------------------------------------------------------------------------
