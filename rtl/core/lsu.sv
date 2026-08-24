@@ -218,6 +218,14 @@ module lsu (
       discard_q        <= 1'b0;
       load_data_q      <= 32'b0;
       exception_q      <= '0;
+
+      // A request accepted before reset cannot be cancelled. Drain its single
+      // response before accepting a new pipeline memory operation.
+      if ((state_q == LSU_BUSY) && request_sent_q && !dmem_m.rsp_valid) begin
+        state_q        <= LSU_BUSY;
+        request_sent_q <= 1'b1;
+        discard_q      <= 1'b1;
+      end
     end else begin
       unique case (state_q)
         LSU_IDLE: begin
@@ -286,4 +294,3 @@ module lsu (
   end
 
 endmodule
-

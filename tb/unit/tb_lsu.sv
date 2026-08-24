@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 module tb_lsu;
 
@@ -398,6 +397,89 @@ module tb_lsu;
     check_bit(dmem.req_valid, 1'b0, "reset leaves memory idle");
     check_bit(rsp_valid, 1'b0, "reset leaves response idle");
 
+    // A ready memory must see the request in the same cycle that the LSU
+    // accepts the pipeline operation. This is the zero-bubble issue path that
+    // avoids an unconditional LSU_IDLE -> LSU_REQ setup cycle.
+    @(negedge clk);
+    cmd            = MEM_STORE;
+    size           = MEM_HALF;
+    load_unsigned  = 1'b0;
+    addr           = TEST_BASE + 32'd2;
+    store_data     = 32'h1234_cafe;
+    req_valid      = 1'b1;
+    dmem.req_ready = 1'b1;
+    #1;
+    check_bit(req_ready, 1'b1, "fall-through request input ready");
+    check_memory_request(
+      1'b1,
+      TEST_BASE,
+      4'b1100,
+      32'hcafe_0000,
+      "fall-through request"
+    );
+    check_nibble(trace_wstrb, 4'b1100, "fall-through request trace strobe");
+    check_word(trace_wdata, 32'hcafe_0000, "fall-through request trace data");
+
+    @(posedge clk);
+    #1;
+    req_valid      = 1'b0;
+    dmem.req_ready = 1'b0;
+    check_bit(dmem.req_valid, 1'b0, "fall-through request accepted once");
+    check_bit(req_ready, 1'b0, "fall-through request waits for response");
+    send_memory_response(
+      32'b0,
+      1'b0,
+      32'b0,
+      1'b0,
+      EXC_INST_ADDR_MISALIGNED,
+      32'b0,
+      4'b1100,
+      32'hcafe_0000,
+      "fall-through request"
+    );
+
+    // Also exercise a response that returns on the IDLE fall-through cycle.
+    // With pipeline backpressure, the LSU must decode from the live input and
+    // retain the response after the memory pulse disappears.
+    @(negedge clk);
+    cmd             = MEM_LOAD;
+    size            = MEM_BYTE;
+    load_unsigned   = 1'b0;
+    addr            = TEST_BASE + 32'd1;
+    store_data      = 32'b0;
+    req_valid       = 1'b1;
+    rsp_ready       = 1'b0;
+    dmem.req_ready  = 1'b1;
+    dmem.rsp_valid  = 1'b1;
+    dmem.rsp_rdata  = 32'h0000_8000;
+    #1;
+    check_memory_request(
+      1'b0,
+      TEST_BASE,
+      4'b0000,
+      32'b0,
+      "fall-through zero-latency response"
+    );
+    check_bit(rsp_valid, 1'b1, "fall-through zero-latency response valid");
+    check_word(load_data, 32'hffff_ff80, "fall-through zero-latency response data");
+
+    @(posedge clk);
+    #1;
+    req_valid       = 1'b0;
+    dmem.req_ready  = 1'b0;
+    dmem.rsp_valid  = 1'b0;
+    dmem.rsp_rdata  = 32'b0;
+    check_bit(rsp_valid, 1'b1, "fall-through response held valid");
+    check_word(load_data, 32'hffff_ff80, "fall-through response held data");
+    check_bit(req_ready, 1'b0, "fall-through response blocks next operation");
+
+    @(negedge clk);
+    rsp_ready = 1'b1;
+    @(posedge clk);
+    #1;
+    check_bit(rsp_valid, 1'b0, "fall-through response consumed");
+    check_bit(req_ready, 1'b1, "fall-through response releases LSU");
+
     // Every little-endian store lane and supported store width.
     run_store(
       MEM_BYTE, TEST_BASE + 32'd0, 32'h1234_56a0,
@@ -732,6 +814,77 @@ module tb_lsu;
     dmem.rsp_rdata = 32'b0;
     #1;
     check_bit(req_ready, 1'b1, "killed outstanding load releases LSU");
+
+    // Reset cannot cancel an already accepted memory transaction. Drain its
+    // late response before accepting another operation, without exposing or
+    // mistagging the pre-reset load response.
+    start_request(
+      MEM_LOAD,
+      MEM_WORD,
+      1'b0,
+      TEST_BASE,
+      32'b0,
+      "reset drain old load"
+    );
+    accept_memory_request(
+      1'b0,
+      TEST_BASE,
+      4'b0000,
+      32'b0,
+      "reset drain old load"
+    );
+
+    @(negedge clk);
+    rst = 1'b1;
+    #1;
+    check_bit(dmem.req_valid, 1'b0, "reset drain suppresses memory request");
+    check_bit(req_ready, 1'b0, "reset drain suppresses pipeline ready");
+    check_bit(rsp_valid, 1'b0, "reset drain suppresses pipeline response");
+
+    repeat (2) begin
+      @(posedge clk);
+      #1;
+      check_bit(dmem.req_valid, 1'b0, "reset drain holds memory request idle");
+      check_bit(req_ready, 1'b0, "reset drain holds pipeline request");
+      check_bit(rsp_valid, 1'b0, "reset drain holds pipeline response idle");
+    end
+
+    @(negedge clk);
+    rst           = 1'b0;
+    cmd           = MEM_LOAD;
+    size          = MEM_WORD;
+    load_unsigned = 1'b0;
+    addr          = TEST_BASE + 32'd4;
+    store_data    = 32'b0;
+    req_valid     = 1'b1;
+    #1;
+    check_bit(req_ready, 1'b0, "reset drain blocks next operation");
+    check_bit(dmem.req_valid, 1'b0, "reset drain waits for old response");
+    check_bit(rsp_valid, 1'b0, "reset drain has no old pipeline response");
+
+    @(negedge clk);
+    dmem.rsp_valid = 1'b1;
+    dmem.rsp_rdata = 32'hdead_beef;
+    #1;
+    check_bit(req_ready, 1'b0, "reset drain old response blocks next operation");
+    check_bit(dmem.req_valid, 1'b0, "reset drain old response starts no request");
+    check_bit(rsp_valid, 1'b0, "reset drain drops old response");
+
+    @(posedge clk);
+    #1;
+    req_valid      = 1'b0;
+    dmem.rsp_valid = 1'b0;
+    dmem.rsp_rdata = 32'b0;
+    check_bit(req_ready, 1'b1, "reset drain releases LSU after old response");
+
+    run_load(
+      MEM_WORD,
+      1'b0,
+      TEST_BASE + 32'd4,
+      32'hcafe_babe,
+      32'hcafe_babe,
+      "reset drain next load"
+    );
 
     // A zero-latency slave may return a response in the request-acceptance
     // cycle. This is not required by the TCM, but the LSU supports it without
