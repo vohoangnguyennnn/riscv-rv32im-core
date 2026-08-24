@@ -21,9 +21,8 @@ module rv32_tcm #(
   (* ram_style = "block" *)
   logic [31:0] mem [0:WORD_COUNT-1];
 
-  // Vivado maps a constant readmemh file into BRAM INIT attributes. Leaving
-  // INIT_FILE empty preserves the uninitialized-memory behavior expected by
-  // ASIC flows and by testbenches that load the array explicitly.
+  // Vivado maps readmemh into BRAM INIT attributes; an empty INIT_FILE preserves
+  // uninitialized memory for ASIC flows and testbench-driven loading.
   initial begin
     if (INIT_FILE != "") begin
       $readmemh(INIT_FILE, mem);
@@ -44,16 +43,14 @@ module rv32_tcm #(
   assign imem_word_index = imem_byte_offset[INDEX_WIDTH+1:2];
   assign dmem_word_index = dmem_byte_offset[INDEX_WIDTH+1:2];
 
-  // Request addresses are byte addresses, but every TCM transaction transfers
-  // one aligned 32-bit word. LSU handles architectural misalignment earlier.
+  // TCM transfers aligned words; the LSU handles architectural misalignment.
   assign imem_in_range = (imem_byte_offset < BYTE_COUNT) && (imem_s.req_addr[1:0] == 2'b00);
   assign dmem_in_range = (dmem_byte_offset < BYTE_COUNT) && (dmem_s.req_addr[1:0] == 2'b00);
 
   // The instruction port is deliberately read-only.
   assign imem_read_ok = imem_in_range && !imem_s.req_write && (imem_s.req_wstrb == 4'b0000);
 
-  // Fixed-latency TCM can accept a new request while returning the previous
-  // response. Core-side masters guarantee at most one request outstanding.
+  // Fixed latency permits simultaneous response and next-request acceptance.
   assign imem_s.req_ready = 1'b1;
   assign dmem_s.req_ready = 1'b1;
 
