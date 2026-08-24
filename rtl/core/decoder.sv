@@ -24,14 +24,12 @@ module decoder (
     funct3 = insn_i[14:12];
     funct7 = insn_i[31:25];
 
-    // Register indices are always exposed. uses_rs1/uses_rs2 determine whether
-    // the corresponding instruction fields are architectural dependencies.
+    // Register indices are always exposed; uses_rs* identify true dependencies.
     rs1_o = insn_i[19:15];
     rs2_o = insn_i[24:20];
     rd_o  = insn_i[11:7];
 
-    // Benign defaults prevent latches and suppress side effects for illegal
-    // instructions. Enum zero values provide the NONE/EX_RESULT defaults.
+    // Side-effect-free defaults make unmatched encodings illegal without latches.
     imm_sel_o          = IMM_NONE;
     ctrl_o             = '0;
     ctrl_o.op_a_sel    = OP_A_ZERO;
@@ -268,6 +266,10 @@ module decoder (
                 ctrl_o.is_mret = 1'b1;
                 illegal_o      = 1'b0;
               end
+
+              // WFI is legal but acts as a NOP because this core has no
+              // low-power wait state; its exact encoding is still enforced.
+              INSN_WFI: illegal_o = 1'b0;
 
               default: ;
             endcase

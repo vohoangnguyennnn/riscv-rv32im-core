@@ -1,19 +1,20 @@
 
 // Centralized control for the RV32IM five-stage pipeline.
 //
-// Pipeline-register storage remains in rv32_core. This module emits only
-// enable/flush decisions and the selected fetch redirect. Priority follows
-// instruction age so an older trap, exception, or wait can never be overridden
-// by a younger control transfer or data hazard.
+// Emits enable/flush/redirect decisions; storage remains in rv32_core. Action
+// priority follows instruction age, so younger events cannot override older
+// traps, faults, or waits.
 module pipeline_ctrl (
   input  logic                       clk_i,
   input  logic                       rst_i,
 
   input  logic                       load_use_i,
   input  logic                       csr_dep_i,
+  input  logic                       irq_state_wait_i,
   input  logic                       ex_wait_i,
   input  logic                       mem_wait_i,
   input  logic                       id_exception_i,
+  input  logic                       id_interrupt_i,
   input  logic                       ex_exception_i,
   input  logic                       mem_exception_i,
   input  logic                       wb_trap_i,
@@ -39,7 +40,9 @@ module pipeline_ctrl (
   typedef enum logic [3:0] {
     ACTION_ADVANCE,
     ACTION_ID_HAZARD,
+    ACTION_IRQ_STATE_WAIT,
     ACTION_ID_EXCEPTION,
+    ACTION_ID_INTERRUPT,
     ACTION_EX_REDIRECT,
     ACTION_TRAP_DRAIN,
     ACTION_EX_WAIT,
@@ -58,9 +61,7 @@ module pipeline_ctrl (
   assign id_hazard   = load_use_i || csr_dep_i;
   assign trap_drain_o = trap_drain_q;
 
-  // Select exactly one pipeline action.  The source order is the architectural
-  // age/priority order from the design specification; enum numeric values do
-  // not encode priority and are used only to make waveforms self-describing.
+  // Source order, not enum value, defines architectural age priority.
   always_comb begin
     action = ACTION_ADVANCE;
 
@@ -80,16 +81,19 @@ module pipeline_ctrl (
       action = ACTION_TRAP_DRAIN;
     end else if (control_redirect_i.valid) begin
       action = ACTION_EX_REDIRECT;
+    end else if (irq_state_wait_i) begin
+      action = ACTION_IRQ_STATE_WAIT;
     end else if (id_exception_i) begin
       action = ACTION_ID_EXCEPTION;
+    end else if (id_interrupt_i) begin
+      action = ACTION_ID_INTERRUPT;
     end else if (id_hazard) begin
       action = ACTION_ID_HAZARD;
     end
   end
 
   always_comb begin
-    // Normal pipeline advance. Flush has priority over enable at the pipeline
-    // registers, so flush events can retain these enable defaults.
+    // Flush outranks enable in the pipeline registers, so advance is the base.
     pc_enable_o     = 1'b1;
     if_id_enable_o  = 1'b1;
     id_ex_enable_o  = 1'b1;
@@ -106,8 +110,7 @@ module pipeline_ctrl (
     trap_drain_d     = trap_drain_q;
 
     unique case (action)
-      // Synchronous reset is also handled directly by every pipeline register
-      // and IF stage.  An all-stage flush keeps outputs benign during reset.
+      // All-stage flush keeps controller outputs benign during reset.
       ACTION_RESET: begin
         pc_enable_o     = 1'b0;
         if_id_enable_o  = 1'b0;
@@ -123,9 +126,7 @@ module pipeline_ctrl (
         trap_drain_d = 1'b0;
       end
 
-      // The trapping instruction commits its mepc/mcause/mtval update in the
-      // CSR file at this edge. Squash all younger packets, consume MEM/WB, and
-      // restart fetch at the current aligned direct-mode mtvec value.
+      // Commit trap state, squash younger packets, and restart at direct mtvec.
       ACTION_WB_TRAP: begin
         if_id_flush_o  = 1'b1;
         id_ex_flush_o  = 1'b1;
@@ -137,8 +138,7 @@ module pipeline_ctrl (
         trap_drain_d     = 1'b0;
       end
 
-      // Let the offending MEM instruction enter MEM/WB and squash all younger
-      // work, including the unaccepted combinational EX result.
+      // Advance the MEM offender and squash all younger work.
       ACTION_MEM_EXCEPTION: begin
         pc_enable_o = 1'b0;
 
@@ -149,8 +149,7 @@ module pipeline_ctrl (
         trap_drain_d = 1'b1;
       end
 
-      // EX/MEM remains owned by the memory instruction.  MEM/WB receives one
-      // bubble after an older WB entry commits, preventing repeated retirement.
+      // Hold EX/MEM ownership; bubble MEM/WB to prevent repeated retirement.
       ACTION_MEM_WAIT: begin
         pc_enable_o     = 1'b0;
         if_id_enable_o  = 1'b0;
@@ -160,8 +159,7 @@ module pipeline_ctrl (
         mem_wb_flush_o = 1'b1;
       end
 
-      // Advance the offending EX packet into EX/MEM and squash both younger
-      // pipeline entries before entering precise trap drain.
+      // Advance the EX offender, squash younger packets, then enter drain.
       ACTION_EX_EXCEPTION: begin
         pc_enable_o = 1'b0;
 
@@ -171,9 +169,7 @@ module pipeline_ctrl (
         trap_drain_d = 1'b1;
       end
 
-      // Hold the current ID/EX operation while MUL/DIV is running or a valid EX
-      // result is backpressured. The older EX/MEM entry advances and is then
-      // replaced by a bubble until EX produces an accepted result.
+      // Hold ID/EX while EX is busy/backpressured; bubble the vacated EX/MEM.
       ACTION_EX_WAIT: begin
         pc_enable_o    = 1'b0;
         if_id_enable_o = 1'b0;
@@ -182,8 +178,7 @@ module pipeline_ctrl (
         ex_mem_flush_o = 1'b1;
       end
 
-      // No younger redirect or ID event may restart the front end while the
-      // oldest known exception is moving toward architectural commit.
+      // Block younger front-end events until the selected trap commits.
       ACTION_TRAP_DRAIN: begin
         pc_enable_o    = 1'b0;
         if_id_enable_o = 1'b0;
@@ -197,14 +192,19 @@ module pipeline_ctrl (
         id_ex_flush_o    = 1'b1;
       end
 
-      // The faulting ID packet advances into ID/EX; only the younger fetch
-      // packet is discarded before precise drain begins.
-      ACTION_ID_EXCEPTION: begin
+      // ID exceptions and interrupts move identically, but distinct actions
+      // preserve arbitration visibility in waveforms.
+      ACTION_ID_EXCEPTION,
+      ACTION_ID_INTERRUPT: begin
         pc_enable_o   = 1'b0;
         if_id_flush_o = 1'b1;
 
         trap_drain_d = 1'b1;
       end
+
+      // Hold ID behind older mstatus/mie/MRET state until post-commit
+      // interrupt eligibility is known.
+      ACTION_IRQ_STATE_WAIT,
 
       // Hold PC and IF/ID while injecting exactly one bubble into ID/EX.
       ACTION_ID_HAZARD: begin

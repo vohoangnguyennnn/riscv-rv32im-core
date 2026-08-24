@@ -79,6 +79,7 @@ package rv32_pkg;
   localparam logic [31:0] INSN_ECALL  = 32'h0000_0073;
   localparam logic [31:0] INSN_EBREAK = 32'h0010_0073;
   localparam logic [31:0] INSN_MRET   = 32'h3020_0073;
+  localparam logic [31:0] INSN_WFI    = 32'h1050_0073;
 
   // Datapath and decode controls
   typedef enum logic [3:0] {
@@ -174,26 +175,79 @@ package rv32_pkg;
     FWD_MEM_WB
   } fwd_sel_e;
 
-  // Minimal machine-mode CSR set
-  localparam csr_addr_t CSR_MISA      = 12'h301;
-  localparam csr_addr_t CSR_MTVEC     = 12'h305;
-  localparam csr_addr_t CSR_MSCRATCH  = 12'h340;
-  localparam csr_addr_t CSR_MEPC      = 12'h341;
-  localparam csr_addr_t CSR_MCAUSE    = 12'h342;
-  localparam csr_addr_t CSR_MTVAL     = 12'h343;
-  localparam csr_addr_t CSR_MCYCLE    = 12'hb00;
-  localparam csr_addr_t CSR_MINSTRET  = 12'hb02;
-  localparam csr_addr_t CSR_MCYCLEH   = 12'hb80;
-  localparam csr_addr_t CSR_MINSTRETH = 12'hb82;
-  localparam csr_addr_t CSR_MVENDORID = 12'hf11;
-  localparam csr_addr_t CSR_MARCHID   = 12'hf12;
-  localparam csr_addr_t CSR_MIMPID    = 12'hf13;
-  localparam csr_addr_t CSR_MHARTID   = 12'hf14;
+  // M-only CSR subset: MPP has the single legal value M and MTIP/MTIE are the
+  // only implemented interrupt pending/enable bits.
+  /* verilator lint_off UNUSEDPARAM */
+  localparam csr_addr_t CSR_MSTATUS    = 12'h300;
+  localparam csr_addr_t CSR_MISA       = 12'h301;
+  localparam csr_addr_t CSR_MIE        = 12'h304;
+  localparam csr_addr_t CSR_MTVEC      = 12'h305;
+  localparam csr_addr_t CSR_MSCRATCH   = 12'h340;
+  localparam csr_addr_t CSR_MEPC       = 12'h341;
+  localparam csr_addr_t CSR_MCAUSE     = 12'h342;
+  localparam csr_addr_t CSR_MTVAL      = 12'h343;
+  localparam csr_addr_t CSR_MIP        = 12'h344;
+  localparam csr_addr_t CSR_MCYCLE     = 12'hb00;
+  localparam csr_addr_t CSR_MINSTRET   = 12'hb02;
+  localparam csr_addr_t CSR_MCYCLEH    = 12'hb80;
+  localparam csr_addr_t CSR_MINSTRETH  = 12'hb82;
+  localparam csr_addr_t CSR_MVENDORID  = 12'hf11;
+  localparam csr_addr_t CSR_MARCHID    = 12'hf12;
+  localparam csr_addr_t CSR_MIMPID     = 12'hf13;
+  localparam csr_addr_t CSR_MHARTID    = 12'hf14;
+  localparam csr_addr_t CSR_MCONFIGPTR = 12'hf15;
 
   localparam word_t MISA_RV32IM = 32'h4000_1100;
 
+  // MPP is single-value WARL=M; only MIE/MPIE are writable state.
+  localparam int unsigned MSTATUS_MIE_BIT  = 3;
+  localparam int unsigned MSTATUS_MPIE_BIT = 7;
+  localparam int unsigned MSTATUS_MPP_LSB  = 11;
+  localparam int unsigned MSTATUS_MPP_MSB  = 12;
+
+  localparam word_t MSTATUS_MIE_MASK         = 32'h0000_0008;
+  localparam word_t MSTATUS_MPIE_MASK        = 32'h0000_0080;
+  localparam word_t MSTATUS_MPP_MASK         = 32'h0000_1800;
+  localparam word_t MSTATUS_MPP_M_VALUE      = 32'h0000_1800;
+  localparam word_t MSTATUS_IMPLEMENTED_MASK = MSTATUS_MIE_MASK
+                                                | MSTATUS_MPIE_MASK
+                                                | MSTATUS_MPP_MASK;
+  localparam word_t MSTATUS_WRITABLE_MASK    = MSTATUS_MIE_MASK
+                                                | MSTATUS_MPIE_MASK;
+  localparam word_t MSTATUS_RESET_VALUE      = MSTATUS_MPP_M_VALUE;
+
+  // mie/mip share standard bit positions. MSIP/MEIP are RO0; MTIP is the live,
+  // read-only timer-comparator level.
+  localparam int unsigned MINT_MSIP_BIT = 3;
+  localparam int unsigned MINT_MTIP_BIT = 7;
+  localparam int unsigned MINT_MEIP_BIT = 11;
+
+  localparam word_t MIE_MSIE_MASK        = 32'h0000_0008;
+  localparam word_t MIE_MTIE_MASK        = 32'h0000_0080;
+  localparam word_t MIE_MEIE_MASK        = 32'h0000_0800;
+  localparam word_t MIE_IMPLEMENTED_MASK = MIE_MTIE_MASK;
+  localparam word_t MIE_WRITABLE_MASK    = MIE_MTIE_MASK;
+  localparam word_t MIE_RESET_VALUE      = 32'b0;
+
+  localparam word_t MIP_MSIP_MASK        = 32'h0000_0008;
+  localparam word_t MIP_MTIP_MASK        = 32'h0000_0080;
+  localparam word_t MIP_MEIP_MASK        = 32'h0000_0800;
+  localparam word_t MIP_IMPLEMENTED_MASK = MIP_MTIP_MASK;
+  localparam word_t MIP_WRITABLE_MASK    = 32'b0;
+
+  // mcause[XLEN-1] distinguishes interrupts; five code bits cover this scope.
+  localparam int unsigned TRAP_CAUSE_W = 5;
+  typedef logic [TRAP_CAUSE_W-1:0] trap_cause_t;
+
+  localparam int unsigned MCAUSE_INTERRUPT_BIT  = XLEN - 1;
+  localparam word_t       MCAUSE_INTERRUPT_MASK = 32'h8000_0000;
+  localparam word_t       MCAUSE_CODE_MASK      = 32'h0000_001f;
+  localparam trap_cause_t IRQ_M_TIMER_CAUSE     = 5'd7;
+  localparam word_t       MCAUSE_M_TIMER_VALUE  = 32'h8000_0007;
+  /* verilator lint_on UNUSEDPARAM */
+
   // Standard synchronous exception cause values.
-  typedef enum logic [4:0] {
+  typedef enum trap_cause_t {
     EXC_INST_ADDR_MISALIGNED  = 5'd0,
     EXC_INST_ACCESS_FAULT     = 5'd1,
     EXC_ILLEGAL_INSN          = 5'd2,
@@ -213,6 +267,7 @@ package rv32_pkg;
 
   typedef struct packed {
     logic       valid;
+    logic       is_interrupt;
     exc_cause_e cause;
     word_t      tval;
   } exc_t;
@@ -272,6 +327,7 @@ package rv32_pkg;
     logic      csr_write;
     word_t     csr_wdata;
     word_t     csr_old;
+    logic      is_mret;
     logic      control;
     logic      control_taken;
     word_t     control_target;
@@ -288,6 +344,7 @@ package rv32_pkg;
     logic      csr_write;
     csr_addr_t csr_addr;
     word_t     csr_wdata;
+    logic      is_mret;
     logic      mem_write;
     word_t     mem_addr;
     logic [3:0] mem_wstrb;

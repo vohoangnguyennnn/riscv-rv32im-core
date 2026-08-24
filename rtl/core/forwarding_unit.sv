@@ -1,9 +1,8 @@
 // Combinational EX-stage forwarding selector.
 //
-// The youngest available producer wins independently for each source operand:
-// EX/MEM has priority over MEM/WB.  EX/MEM loads are deliberately excluded
-// because their data is not available until the MEM response reaches MEM/WB.
-// Pipeline packets carrying exceptions never participate in forwarding.
+// The youngest producer wins per operand: EX/MEM precedes MEM/WB. EX/MEM loads
+// are excluded because their data is unavailable until MEM/WB; exception
+// packets never forward.
 module forwarding_unit (
   input  wire rv32_pkg::id_ex_t   id_ex_i,
   input  wire rv32_pkg::ex_mem_t  ex_mem_i,
@@ -33,11 +32,10 @@ module forwarding_unit (
   always_comb begin
     consumer_valid = id_ex_i.valid && !id_ex_i.exc.valid;
 
-    // ALU/MDU results, PC+4, and the old CSR value are available from EX/MEM.
-    // A load result is available only after memory completes in MEM/WB.
+    // EX/MEM can forward every writeback source except an incomplete load.
     ex_mem_value_ready = ex_mem_i.valid && ex_mem_i.reg_write && !ex_mem_i.exc.valid && (ex_mem_i.rd != 5'd0) && (ex_mem_i.wb_sel != WB_LOAD);
 
-    // MEM/WB wb_data is already the final architectural writeback value, including completed loads.
+    // MEM/WB carries the final architectural value, including completed loads.
     mem_wb_value_ready = mem_wb_i.valid && mem_wb_i.reg_write && !mem_wb_i.exc.valid && (mem_wb_i.rd != 5'd0);
 
     ex_a_sel_o = FWD_REGFILE;

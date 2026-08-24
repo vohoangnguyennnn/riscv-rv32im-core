@@ -1,11 +1,9 @@
 // Combinational ID-stage hazard detector.
 //
-// The baseline pipeline needs one data interlock: a load in ID/EX cannot
-// provide its value to the immediately following consumer.  All other GPR RAW
-// dependencies are handled by EX forwarding.  CSR writes commit in WB, so a
-// CSR reader in ID is serialized behind conflicting writers in ID/EX and
-// EX/MEM. A writer already in MEM/WB commits on the same edge that advances the
-// reader to EX and therefore does not require another stall.
+// A load in ID/EX cannot forward to its immediate consumer; all other GPR RAW
+// dependencies use EX forwarding. CSR readers also wait for conflicting
+// writers in ID/EX or EX/MEM. A MEM/WB writer commits before the reader reaches
+// EX, so it requires no additional stall.
 module hazard_unit (
   input  logic                         id_valid_i,
   input  logic [4:0]                   id_rs1_i,
@@ -43,8 +41,7 @@ module hazard_unit (
     end
   endfunction
 
-  // CSRRW and CSRRWI always write, including an x0/zimm=0 source.  Set/clear
-  // forms suppress the CSR write when their register or immediate mask is 0.
+  // CSRRW[I] always writes; CSRRS/RC[I] suppress writes for a zero mask.
   function automatic logic csr_command_writes(
     input csr_cmd_e  command,
     input reg_addr_t source
@@ -64,11 +61,9 @@ module hazard_unit (
     end
   endfunction
 
-  // The RV32 low/high views of a 64-bit counter share one architectural state
-  // object. Treat both halves as aliases: a write to one half suppresses the
-  // counter's implicit update on its commit edge and can therefore affect the
-  // other half on a carry boundary. All other implemented CSRs conflict only
-  // on an exact address match.
+  // Low/high counter CSRs alias one 64-bit state: writing either half suppresses
+  // that edge's implicit update and may affect the other half across a carry.
+  // Other implemented CSRs conflict only on an exact address match.
   function automatic logic csr_addresses_conflict(
     input csr_addr_t consumer,
     input csr_addr_t producer
@@ -114,35 +109,25 @@ module hazard_unit (
 
     ex_mem_csr_writer = ex_mem_i.valid && !ex_mem_i.exc.valid && ex_mem_i.csr_write;
 
-    // Only an older writer to the same architectural CSR state blocks a
-    // general CSR instruction. This removes false dependencies such as an
-    // mtvec access behind an mscratch write without weakening RAW ordering.
-    csr_dependency = id_valid_i
-                   && (id_ctrl_i.csr_cmd != CSR_NONE)
-                   && ((id_ex_csr_writer
-                        && csr_addresses_conflict(id_csr_addr_i, id_ex_i.insn[31:20]))
+    // Stall only for an older writer to the same CSR state, avoiding false
+    // dependencies without weakening RAW ordering.
+    csr_dependency = id_valid_i && (id_ctrl_i.csr_cmd != CSR_NONE) && ((id_ex_csr_writer && csr_addresses_conflict(id_csr_addr_i, id_ex_i.insn[31:20]))
                        || (ex_mem_csr_writer
                            && csr_addresses_conflict(id_csr_addr_i, ex_mem_i.csr_addr)));
 
-    // MRET reads only mepc.  Unlike a general CSR instruction, it needs to
-    // wait only for an older writer targeting that exact CSR.
+    // MRET reads only mepc and waits only for an older mepc writer.
     mret_dependency = id_valid_i && id_ctrl_i.is_mret && ((id_ex_csr_writer && (id_ex_i.insn[31:20] == CSR_MEPC)) || (ex_mem_csr_writer && (ex_mem_i.csr_addr == CSR_MEPC)));
 
-    // minstret changes implicitly when every older non-trapping instruction
-    // commits. Drain ID/EX and EX/MEM before reading either RV32 half so the
-    // explicit CSR read observes all preceding retirements in program order.
-    minstret_dependency = id_valid_i
-                        && (id_ctrl_i.csr_cmd != CSR_NONE)
-                        && ((id_csr_addr_i == CSR_MINSTRET) || (id_csr_addr_i == CSR_MINSTRETH))
+    // Drain older stages before reading minstret[h], so all preceding
+    // retirements are visible in program order.
+    minstret_dependency = id_valid_i && (id_ctrl_i.csr_cmd != CSR_NONE) && ((id_csr_addr_i == CSR_MINSTRET) || (id_csr_addr_i == CSR_MINSTRETH))
                         && ((id_ex_i.valid && !id_ex_i.exc.valid) || (ex_mem_i.valid && !ex_mem_i.exc.valid));
 
     csr_dep_o  = csr_dependency || mret_dependency || minstret_dependency;
     stall_id_o = load_use_o || csr_dep_o;
   end
 
-  // mem_wb_i is part of the stable hazard-unit contract so the commit-stage
-  // timing is explicit at this boundary.  It is intentionally not interlocked:
-  // MEM/WB CSR writes become visible before the held ID instruction reads the
-  // CSR file in its following EX cycle.
+  // MEM/WB is intentionally not interlocked: its CSR write becomes visible
+  // before the held ID instruction reads that CSR in EX.
 
 endmodule

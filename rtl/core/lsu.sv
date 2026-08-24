@@ -149,26 +149,30 @@ module lsu (
     endcase
   end
 
+  // Keep the request channel independent of the response datapath. Besides
+  // making the ready/valid contract explicit, this prevents interconnect
+  // address decoding from creating a false combinational-loop dependency in
+  // tools that conservatively analyze an entire always_comb process.
+  assign req_ready_o = (state_q == LSU_IDLE) && !rst_i && !kill_i;
+  assign issue_input = req_valid_i && req_ready_o && input_is_memory && !input_misaligned;
+  assign issue_saved = (state_q == LSU_BUSY) && !request_sent_q;
+
+  assign dmem_m.req_valid = issue_input || issue_saved;
+  assign dmem_m.req_addr  = issue_input ? {addr_i[31:2], 2'b00} : {addr_q[31:2], 2'b00};
+  assign dmem_m.req_write = issue_input ? (cmd_i == MEM_STORE) : (cmd_q == MEM_STORE);
+  assign dmem_m.req_wdata = issue_input ? input_store_wdata : store_wdata_q;
+  assign dmem_m.req_wstrb = dmem_m.req_write ? (issue_input ? input_store_wstrb : store_wstrb_q) : 4'b0000;
+
+  assign request_fire    = dmem_m.req_valid && dmem_m.req_ready;
+  assign response_seen   = dmem_m.rsp_valid && (((state_q == LSU_BUSY) && (request_sent_q || request_fire)) || ((state_q == LSU_IDLE) && request_fire));
+  assign response_discard = kill_i || ((state_q == LSU_BUSY) && discard_q);
+
   always_comb begin
-    req_ready_o   = (state_q == LSU_IDLE) && !rst_i && !kill_i;
     rsp_valid_o   = 1'b0;
     load_data_o   = 32'b0;
     exception_o   = '0;
     trace_wstrb_o = 4'b0000;
     trace_wdata_o = 32'b0;
-
-    issue_input = req_valid_i && req_ready_o && input_is_memory && !input_misaligned;
-    issue_saved = (state_q == LSU_BUSY) && !request_sent_q;
-
-    dmem_m.req_valid = issue_input || issue_saved;
-    dmem_m.req_addr  = issue_input ? {addr_i[31:2], 2'b00} : {addr_q[31:2], 2'b00};
-    dmem_m.req_write = issue_input ? (cmd_i == MEM_STORE) : (cmd_q == MEM_STORE);
-    dmem_m.req_wdata = issue_input ? input_store_wdata : store_wdata_q;
-    dmem_m.req_wstrb = dmem_m.req_write ? (issue_input ? input_store_wstrb : store_wstrb_q) : 4'b0000;
-
-    request_fire = dmem_m.req_valid && dmem_m.req_ready;
-    response_seen = dmem_m.rsp_valid && (((state_q == LSU_BUSY) && (request_sent_q || request_fire)) || ((state_q == LSU_IDLE) && request_fire));
-    response_discard = kill_i || ((state_q == LSU_BUSY) && discard_q);
 
     if (state_q == LSU_IDLE) begin
       response_load_data = ((cmd_i == MEM_LOAD) && !dmem_m.rsp_err) ? extract_load_data(dmem_m.rsp_rdata, addr_i[1:0], size_i, load_unsigned_i) : 32'b0;

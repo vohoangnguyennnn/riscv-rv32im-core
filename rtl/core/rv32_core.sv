@@ -1,16 +1,18 @@
 
 // RV32IM five-stage pipeline integration.
 //
-// This module owns the IF/ID, ID/EX, EX/MEM, and MEM/WB registers and is the
-// single architectural commit point for the core. EX forwarding, ID load-use
-// hazard detection, blocking RV32M execution, Zicsr commit, and precise
-// machine-mode trap state are integrated here.
+// Owns all pipeline registers and the single architectural commit point,
+// integrating forwarding, interlocks, blocking MDU/LSU work, and precise
+// machine-mode trap/interrupt state.
 module rv32_core #(
   parameter logic [31:0] RESET_VECTOR = 32'h0000_0000,
   parameter logic [31:0] TRAP_VECTOR  = 32'h0000_0100
 ) (
   input  logic clk_i,
   input  logic rst_i,
+
+  // Live MTIP level; committed MIE/MTIE state controls eligibility.
+  input  logic mtip_i,
 
   rv32_mem_if.master imem_m,
   rv32_mem_if.master dmem_m,
@@ -26,6 +28,7 @@ module rv32_core #(
   output logic [31:0] trace_mem_wdata_o,
   output logic        trace_trap_o,
   output logic [4:0]  trace_cause_o,
+  output logic        trace_is_interrupt_o,
   output logic        trace_control_o,
   output logic        trace_taken_o,
   output logic [31:0] trace_target_o,
@@ -44,9 +47,7 @@ module rv32_core #(
 
   import rv32_pkg::*;
 
-  // --------------------------------------------------------------------------
-  // Pipeline state and stage-next packets
-  // --------------------------------------------------------------------------
+  // Pipeline state and stage-next packets.
   if_id_t  if_id_q;
   if_id_t  if_id_d;
   id_ex_t  id_ex_q;
@@ -62,9 +63,7 @@ module rv32_core #(
   exc_t  fetch_exc;
   logic  fetch_consume;
 
-  // --------------------------------------------------------------------------
-  // Central pipeline control
-  // --------------------------------------------------------------------------
+  // Central pipeline control.
   logic pc_enable;
   logic if_id_enable;
   logic id_ex_enable;
@@ -79,6 +78,7 @@ module rv32_core #(
 
   redirect_t control_redirect;
   logic      id_exception;
+  logic      id_interrupt;
   logic      ex_exception;
   logic      mem_exception;
   logic      wb_trap;
@@ -98,12 +98,11 @@ module rv32_core #(
   logic effective_mdu_stall;
   logic effective_mem_stall;
 
-  // --------------------------------------------------------------------------
-  // WB/architectural commit
-  // --------------------------------------------------------------------------
+  // WB/architectural commit.
   logic wb_retire;
   logic wb_reg_write;
   logic wb_csr_write;
+  logic wb_mret_commit;
 
   csr_addr_t csr_raddr;
   logic      csr_access_write;
@@ -111,11 +110,44 @@ module rv32_core #(
   logic      csr_access_illegal;
   word_t     csr_mtvec;
   word_t     csr_mepc;
+  logic      csr_mtimer_irq_eligible;
+  logic      csr_mtimer_irq_eligible_after_commit;
 
-  assign wb_trap      = mem_wb_q.valid && mem_wb_q.exc.valid;
-  assign wb_retire    = mem_wb_q.valid && !mem_wb_q.exc.valid;
-  assign wb_reg_write = wb_retire && mem_wb_q.reg_write && (mem_wb_q.rd != 5'd0);
-  assign wb_csr_write = wb_retire && mem_wb_q.csr_write;
+  // Machine-timer interrupt arbitration.
+  id_ex_t id_ex_decoded;
+  logic   mtimer_irq_eligible;
+  logic   id_ex_irq_state_writer;
+  logic   ex_mem_irq_state_writer;
+  logic   mem_wb_irq_state_writer;
+  logic   irq_state_wait;
+  logic   irq_state_ambiguous;
+  logic   id_interrupt_candidate;
+
+  // Set/clear commands become pure reads for rs1/zimm=0; RW always writes.
+  function automatic logic csr_command_writes(
+    input csr_cmd_e  command,
+    input reg_addr_t source
+  );
+    begin
+      unique case (command)
+        CSR_RW,
+        CSR_RWI: csr_command_writes = 1'b1;
+
+        CSR_RS,
+        CSR_RC,
+        CSR_RSI,
+        CSR_RCI: csr_command_writes = (source != 5'd0);
+
+        default: csr_command_writes = 1'b0;
+      endcase
+    end
+  endfunction
+
+  assign wb_trap       = mem_wb_q.valid && mem_wb_q.exc.valid;
+  assign wb_retire     = mem_wb_q.valid && !mem_wb_q.exc.valid;
+  assign wb_reg_write  = wb_retire && mem_wb_q.reg_write && (mem_wb_q.rd != 5'd0);
+  assign wb_csr_write  = wb_retire && mem_wb_q.csr_write;
+  assign wb_mret_commit = wb_retire && mem_wb_q.is_mret;
 
   // Match the centralized controller's age-priority selection so stall
   // categories are mutually exclusive. Exception/trap drain cycles are not
@@ -128,6 +160,7 @@ module rv32_core #(
                              && !mem_wait
                              && !ex_exception;
   assign effective_load_use_stall = load_use_hazard
+                                  && !irq_state_wait
                                   && !wb_trap
                                   && !mem_exception
                                   && !mem_wait
@@ -135,9 +168,10 @@ module rv32_core #(
                                   && !ex_wait
                                   && !trap_drain
                                   && !control_redirect.valid
-                                  && !id_exception;
-  assign effective_csr_stall = csr_dependency
-                             && !load_use_hazard
+                                  && !id_exception
+                                  && !id_interrupt;
+  assign effective_csr_stall = (irq_state_wait
+                                || (csr_dependency && !load_use_hazard))
                              && !wb_trap
                              && !mem_exception
                              && !mem_wait
@@ -145,7 +179,8 @@ module rv32_core #(
                              && !ex_wait
                              && !trap_drain
                              && !control_redirect.valid
-                             && !id_exception;
+                             && !id_exception
+                             && !id_interrupt;
 
   always_ff @(posedge clk_i) begin
     if (rst_i) begin
@@ -189,16 +224,20 @@ module rv32_core #(
     .commit_waddr_i     (mem_wb_q.csr_addr),
     .commit_wdata_i     (mem_wb_q.csr_wdata),
     .retire_i           (wb_retire),
+    .mret_commit_i      (wb_mret_commit),
     .trap_valid_i       (wb_trap),
     .trap_pc_i          (mem_wb_q.pc),
+    .trap_is_interrupt_i(mem_wb_q.exc.is_interrupt),
     .trap_cause_i       (mem_wb_q.exc.cause),
     .trap_tval_i        (mem_wb_q.exc.tval),
+    .mtip_i             (mtip_i),
     .mtvec_o            (csr_mtvec),
-    .mepc_o             (csr_mepc)
+    .mepc_o             (csr_mepc),
+    .mtimer_irq_eligible_o(csr_mtimer_irq_eligible),
+    .mtimer_irq_eligible_after_commit_o(csr_mtimer_irq_eligible_after_commit)
   );
 
-  // Retirement trace is driven only from MEM/WB.  A trap is a trace event but
-  // is not a retired instruction and cannot write architectural state.
+  // MEM/WB is the only trace source; traps are events, not retirements.
   always_comb begin
     trace_valid_o      = mem_wb_q.valid;
     trace_pc_o         = mem_wb_q.pc;
@@ -211,14 +250,13 @@ module rv32_core #(
     trace_mem_wdata_o  = mem_wb_q.mem_wdata;
     trace_trap_o       = wb_trap;
     trace_cause_o      = wb_trap ? mem_wb_q.exc.cause : 5'b0;
+    trace_is_interrupt_o = wb_trap ? mem_wb_q.exc.is_interrupt : 1'b0;
     trace_control_o    = wb_retire && mem_wb_q.control;
     trace_taken_o      = wb_retire && mem_wb_q.control_taken;
     trace_target_o     = mem_wb_q.control_target;
   end
 
-  // --------------------------------------------------------------------------
-  // IF and IF/ID next packet
-  // --------------------------------------------------------------------------
+  // IF and IF/ID next packet.
   assign fetch_consume = if_id_enable && !if_id_flush;
 
   if_stage #(
@@ -249,19 +287,78 @@ module rv32_core #(
     end
   end
 
-  // --------------------------------------------------------------------------
-  // ID
-  // --------------------------------------------------------------------------
+  // ID and interrupt injection.
   id_stage u_id_stage (
     .clk_i     (clk_i),
     .if_id_i   (if_id_q),
     .wb_we_i   (wb_reg_write),
     .wb_rd_i   (mem_wb_q.rd),
     .wb_data_i (mem_wb_q.wb_data),
-    .id_ex_o   (id_ex_d)
+    .id_ex_o   (id_ex_decoded)
   );
 
-  assign id_exception = id_ex_d.valid && id_ex_d.exc.valid;
+  // MTIP replaces the ID-boundary instruction with a synthetic trap packet;
+  // older work retires first and the interrupted instruction is replayed from
+  // mepc. An attached synchronous exception wins. In-flight mstatus/mie/MRET
+  // state changes serialize this boundary; prioritized post-commit CSR state
+  // prevents both an enable delay and a disable-shadow interrupt.
+  assign mtimer_irq_eligible = csr_mtimer_irq_eligible_after_commit;
+
+  assign id_ex_irq_state_writer = id_ex_q.valid
+                                && !id_ex_q.exc.valid
+                                && (id_ex_q.ctrl.is_mret
+                                    || (csr_command_writes(
+                                          id_ex_q.ctrl.csr_cmd,
+                                          id_ex_q.rs1
+                                        )
+                                        && ((id_ex_q.insn[31:20] == CSR_MSTATUS)
+                                            || (id_ex_q.insn[31:20] == CSR_MIE))));
+
+  assign ex_mem_irq_state_writer = ex_mem_q.valid
+                                 && !ex_mem_q.exc.valid
+                                 && (ex_mem_q.is_mret
+                                     || (ex_mem_q.csr_write
+                                         && ((ex_mem_q.csr_addr == CSR_MSTATUS)
+                                             || (ex_mem_q.csr_addr == CSR_MIE))));
+
+  assign mem_wb_irq_state_writer = mem_wb_q.valid
+                                 && !mem_wb_q.exc.valid
+                                 && (mem_wb_q.is_mret
+                                     || (mem_wb_q.csr_write
+                                         && ((mem_wb_q.csr_addr == CSR_MSTATUS)
+                                             || (mem_wb_q.csr_addr == CSR_MIE))));
+
+  assign irq_state_wait = id_ex_irq_state_writer || ex_mem_irq_state_writer;
+
+  // MEM/WB eligibility uses the exact post-commit CSR next state.
+  assign irq_state_ambiguous = irq_state_wait;
+
+  // Older waits/redirects may reject a candidate; level-sensitive MTIP is then
+  // reevaluated at the next valid instruction boundary.
+  assign id_interrupt_candidate = !rst_i
+                                && !trap_drain
+                                && mtimer_irq_eligible
+                                && !irq_state_ambiguous
+                                && id_ex_decoded.valid
+                                && !id_ex_decoded.exc.valid;
+
+  always_comb begin
+    id_ex_d = id_ex_decoded;
+
+    if (id_interrupt_candidate) begin
+      id_ex_d               = '0;
+      id_ex_d.valid         = 1'b1;
+      id_ex_d.pc            = id_ex_decoded.pc;
+      id_ex_d.insn          = 32'b0;
+      id_ex_d.exc.valid     = 1'b1;
+      id_ex_d.exc.is_interrupt = 1'b1;
+      id_ex_d.exc.cause     = exc_cause_e'(IRQ_M_TIMER_CAUSE);
+      id_ex_d.exc.tval      = 32'b0;
+    end
+  end
+
+  assign id_exception = id_ex_d.valid && id_ex_d.exc.valid && !id_ex_d.exc.is_interrupt;
+  assign id_interrupt = id_ex_d.valid && id_ex_d.exc.valid && id_ex_d.exc.is_interrupt;
 
   hazard_unit u_hazard_unit (
     .id_valid_i    (id_ex_d.valid),
@@ -277,9 +374,7 @@ module rv32_core #(
     .stall_id_o    ()
   );
 
-  // --------------------------------------------------------------------------
-  // EX
-  // --------------------------------------------------------------------------
+  // EX.
   logic        ex_result_valid;
   logic        ex_result_ready;
   logic        ex_kill;
@@ -303,9 +398,8 @@ module rv32_core #(
     endcase
   end
 
-  // An older WB trap or newly completed MEM fault wins over all EX work.  MEM
-  // backpressure removes downstream readiness without killing the held ID/EX
-  // packet.  This avoids a combinational loop through ex_wait/pipeline_ctrl.
+  // Older WB/MEM events block EX. Backpressure removes readiness without
+  // killing ID/EX, avoiding a loop through ex_wait/pipeline_ctrl.
   assign ex_kill         = wb_trap || mem_exception;
   assign ex_result_ready = !wb_trap && !mem_wait && !mem_exception;
 
@@ -330,16 +424,10 @@ module rv32_core #(
     .wait_o                 (ex_wait)
   );
 
-  // Only faults discovered in EX are reported as new EX events.  Exceptions
-  // already attached by IF/ID simply continue draining with their packet.
-  assign ex_exception = ex_result_valid
-                      && ex_mem_d.exc.valid
-                      && !id_ex_q.exc.valid
-                      && ex_result_ready;
+  // Only newly discovered EX faults enter controller arbitration.
+  assign ex_exception = ex_result_valid && ex_mem_d.exc.valid && !id_ex_q.exc.valid && ex_result_ready;
 
-  // --------------------------------------------------------------------------
-  // MEM
-  // --------------------------------------------------------------------------
+  // MEM.
   logic lsu_req_valid;
   logic lsu_rsp_valid;
   logic lsu_rsp_ready;
@@ -373,17 +461,15 @@ module rv32_core #(
     .trace_wdata_o     (lsu_trace_wdata)
   );
 
-  // A blocking memory instruction owns EX/MEM until the LSU produces a sticky
-  // response.  Local misalignment faults and bus errors use the same response
-  // path, so there is no special-case timing in the pipeline controller.
+  // EX/MEM owns a blocking access until the LSU's sticky response; local and
+  // bus faults deliberately use the same completion path.
   assign mem_wait = mem_is_memory && !lsu_rsp_valid;
 
   always_comb begin
     mem_wb_d = '0;
 
     if (ex_mem_q.valid) begin
-      // Non-memory instructions and exception packets complete combinationally
-      // in MEM.  A memory packet becomes valid only with the LSU response.
+      // Memory packets become valid only when the LSU responds.
       if (!mem_is_memory) begin
         mem_wb_d.valid          = 1'b1;
         mem_wb_d.pc             = ex_mem_q.pc;
@@ -393,6 +479,7 @@ module rv32_core #(
         mem_wb_d.csr_write      = ex_mem_q.csr_write;
         mem_wb_d.csr_addr       = ex_mem_q.csr_addr;
         mem_wb_d.csr_wdata      = ex_mem_q.csr_wdata;
+        mem_wb_d.is_mret        = ex_mem_q.is_mret;
         mem_wb_d.control        = ex_mem_q.control;
         mem_wb_d.control_taken  = ex_mem_q.control_taken;
         mem_wb_d.control_target = ex_mem_q.control_target;
@@ -432,26 +519,26 @@ module rv32_core #(
       if (mem_wb_d.valid && mem_wb_d.exc.valid) begin
         mem_wb_d.reg_write = 1'b0;
         mem_wb_d.csr_write = 1'b0;
+        mem_wb_d.is_mret   = 1'b0;
         mem_wb_d.mem_write = 1'b0;
       end
     end
   end
 
-  // Only LSU-originated faults are new MEM exception events.  Older IF/ID/EX
-  // faults retain their packet and advance normally during trap drain.
+  // Only LSU-originated faults are new MEM exception events.
   assign mem_exception = mem_is_memory && lsu_rsp_valid && lsu_exception.valid;
 
-  // --------------------------------------------------------------------------
-  // Pipeline controller
-  // --------------------------------------------------------------------------
+  // Pipeline controller.
   pipeline_ctrl u_pipeline_ctrl (
     .clk_i                (clk_i),
     .rst_i                (rst_i),
     .load_use_i           (load_use_hazard),
     .csr_dep_i            (csr_dependency),
+    .irq_state_wait_i     (irq_state_wait),
     .ex_wait_i            (ex_wait),
     .mem_wait_i           (mem_wait),
     .id_exception_i       (id_exception),
+    .id_interrupt_i       (id_interrupt),
     .ex_exception_i       (ex_exception),
     .mem_exception_i      (mem_exception),
     .wb_trap_i            (wb_trap),
@@ -471,9 +558,7 @@ module rv32_core #(
     .trap_drain_o         (trap_drain)
   );
 
-  // --------------------------------------------------------------------------
-  // Pipeline registers: reset > flush > enable > hold
-  // --------------------------------------------------------------------------
+  // Pipeline-register priority: reset > flush > enable > hold.
   always_ff @(posedge clk_i) begin
     if (rst_i) begin
       if_id_q <= '0;
@@ -492,9 +577,7 @@ module rv32_core #(
     end else if (id_ex_enable) begin
       id_ex_q <= id_ex_d;
     end else if (id_ex_q.valid && wb_reg_write) begin
-      // A MEM/MDU wait may hold this packet after its producer has advanced
-      // through MEM/WB. Preserve the architectural forwarding effect in the
-      // operand snapshot before that producer disappears from the mux inputs.
+      // Refresh operands when a wait outlives the producer's forwarding slot.
       if (id_ex_q.ctrl.uses_rs1 && (id_ex_q.rs1 == mem_wb_q.rd)) begin
         id_ex_q.rs1_value <= mem_wb_q.wb_data;
       end

@@ -1,15 +1,11 @@
 
 // RV32IM + Zicsr execute-stage datapath and control-transfer resolver.
 //
-// Pipeline storage remains in rv32_core. This module applies EX forwarding,
-// selects ALU operands, builds the next EX/MEM packet, performs CSR
-// read-modify-write, and resolves branch/JAL/JALR/MRET. A redirect is emitted
-// only when the EX result is accepted, preventing repeated redirects while the
-// downstream stage is held.
-//
-// MUL/DIV are blocking EX operations. Their request is launched only when no
-// older MEM/WB event blocks EX, and their sticky response is held until the
-// EX/MEM boundary accepts the completed instruction.
+// Pipeline storage remains in rv32_core. This stage applies forwarding, builds
+// EX/MEM, performs CSR read-modify-write, and resolves control transfers.
+// Redirects occur only when EX is accepted, preventing repeats under a hold.
+// MUL/DIV requests wait behind older events and hold their response until the
+// EX/MEM boundary accepts the instruction.
 module ex_stage (
   input  logic                    clk_i,
   input  logic                    rst_i,
@@ -96,16 +92,9 @@ module ex_stage (
 
   assign active     = id_ex_i.valid && !rst_i && !kill_i;
   assign is_csr     = (id_ex_i.ctrl.csr_cmd != CSR_NONE);
-  assign is_mul     = (id_ex_i.ctrl.mdu_op == MDU_MUL)
-                   || (id_ex_i.ctrl.mdu_op == MDU_MULH)
-                   || (id_ex_i.ctrl.mdu_op == MDU_MULHSU)
-                   || (id_ex_i.ctrl.mdu_op == MDU_MULHU);
-  assign is_div     = (id_ex_i.ctrl.mdu_op == MDU_DIV)
-                   || (id_ex_i.ctrl.mdu_op == MDU_DIVU)
-                   || (id_ex_i.ctrl.mdu_op == MDU_REM)
-                   || (id_ex_i.ctrl.mdu_op == MDU_REMU);
-  // An exception already attached to the packet drains normally and must not
-  // launch a stale MDU request.
+  assign is_mul     = (id_ex_i.ctrl.mdu_op == MDU_MUL) || (id_ex_i.ctrl.mdu_op == MDU_MULH) || (id_ex_i.ctrl.mdu_op == MDU_MULHSU) || (id_ex_i.ctrl.mdu_op == MDU_MULHU);
+  assign is_div     = (id_ex_i.ctrl.mdu_op == MDU_DIV) || (id_ex_i.ctrl.mdu_op == MDU_DIVU) || (id_ex_i.ctrl.mdu_op == MDU_REM) || (id_ex_i.ctrl.mdu_op == MDU_REMU);
+  // An incoming exception drains without launching a stale MDU request.
   assign is_mdu     = (is_mul || is_div) && !id_ex_i.exc.valid;
   assign is_control = (id_ex_i.ctrl.branch_kind != BR_NONE) || id_ex_i.ctrl.is_mret;
 
@@ -161,8 +150,7 @@ module ex_stage (
     .misaligned_o (branch_target_misaligned)
   );
 
-  // result_ready_i is also the launch permission: an MDU must not start while
-  // an older memory operation, fault, or WB trap owns pipeline priority.
+  // result_ready_i also prevents MDU launch while an older event owns priority.
   assign mul_req_valid = active && is_mul && result_ready_i && mul_req_ready;
   assign div_req_valid = active && is_div && result_ready_i && div_req_ready;
   assign mul_rsp_ready = active && is_mul && result_ready_i;
@@ -214,9 +202,8 @@ module ex_stage (
     end
   end
 
-  // CSR immediate forms use the zero-extended zimm field, while register forms
-  // consume the forwarded rs1 value. CSRRS/CSRRC suppress the architectural
-  // write when rs1=x0; their immediate forms do the same when zimm=0.
+  // Immediate CSR forms use zimm; register forms use forwarded rs1.
+  // CSRRS/RC[I] suppress the write when their mask is zero.
   always_comb begin
     csr_raddr_o        = 12'b0;
     csr_access_write_o = 1'b0;
@@ -276,12 +263,11 @@ module ex_stage (
       control_target = csr_mepc_i;
     end
 
-    // branch_unit already checks this for branch/JAL/JALR. Re-checking the
-    // selected target also covers MRET without creating a separate comparator.
+    // Rechecking the selected target extends branch_unit alignment checks to MRET.
     control_target_misaligned = id_ex_i.ctrl.is_mret ? (control_taken && (control_target[1:0] != 2'b00)) : branch_target_misaligned;
 
-    // Non-MDU results are combinational; MDU results become valid only with the
-    // selected unit response. Valid remains independent of downstream ready.
+    // MDU results become valid with the selected response; valid is independent
+    // of downstream ready.
     result_valid_o = active && (!is_mdu || mdu_rsp_valid);
     ex_fire        = result_valid_o && result_ready_i;
     wait_o         = active && !ex_fire;
@@ -304,13 +290,13 @@ module ex_stage (
       ex_mem_d.csr_write      = is_csr && csr_write;
       ex_mem_d.csr_wdata      = is_csr ? csr_wdata : 32'b0;
       ex_mem_d.csr_old        = is_csr ? csr_rdata_i : 32'b0;
+      ex_mem_d.is_mret        = id_ex_i.ctrl.is_mret;
       ex_mem_d.control        = is_control;
       ex_mem_d.control_taken  = control_taken;
       ex_mem_d.control_target = control_target;
       ex_mem_d.exc            = id_ex_i.exc;
 
-      // An older IF/ID exception attached to this packet has priority over
-      // faults discovered by EX.
+      // An exception already attached to the packet precedes EX-discovered faults.
       if (!ex_mem_d.exc.valid) begin
         if (is_csr && csr_access_illegal_i) begin
           ex_mem_d.exc.valid = 1'b1;
@@ -323,12 +309,12 @@ module ex_stage (
         end
       end
 
-      // Exception packets keep debug/retirement metadata but cannot create an
-      // architectural or memory side effect.
+      // Exception packets retain metadata but carry no architectural side effects.
       if (ex_mem_d.exc.valid) begin
         ex_mem_d.reg_write = 1'b0;
         ex_mem_d.mem_cmd   = MEM_NONE;
         ex_mem_d.csr_write = 1'b0;
+        ex_mem_d.is_mret   = 1'b0;
       end
     end
 

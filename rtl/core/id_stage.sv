@@ -1,9 +1,7 @@
 // RV32IM + Zicsr instruction-decode stage.
 //
-// Pipeline storage is intentionally kept outside this module. The stage
-// combines strict instruction decode, immediate generation, register-file
-// access, explicit WB-to-ID bypass, and synchronous-exception construction into
-// the next ID/EX bundle.
+// Pipeline storage remains in rv32_core. This stage combines decode, immediate
+// generation, register access, WB-to-ID bypass, and exception construction.
 module id_stage (
   input  logic                   clk_i,
   input  wire rv32_pkg::if_id_t  if_id_i,
@@ -59,9 +57,8 @@ module id_stage (
     .rdata2_o (rf_rs2_data)
   );
 
-  // Explicit WB-to-ID bypass removes any dependency on FPGA read-during-write
-  // behavior. Unused source operands are forced to zero so invalid register
-  // fields cannot introduce X values into later stages.
+  // Explicit WB-to-ID bypass avoids technology-specific read-during-write
+  // behavior; unused operands are zeroed to prevent X propagation.
   always_comb begin
     id_rs1_value = 32'b0;
     id_rs2_value = 32'b0;
@@ -99,8 +96,7 @@ module id_stage (
       id_ex_d.ctrl      = dec_ctrl;
       id_ex_d.exc       = if_id_i.exc;
 
-      // A fetch exception belongs to the same instruction packet and has
-      // priority over errors that decoding its placeholder bits might produce.
+      // A fetch exception precedes errors from decoding its placeholder bits.
       if (!if_id_i.exc.valid) begin
         if (dec_illegal) begin
           id_ex_d.exc.valid = 1'b1;
@@ -117,8 +113,7 @@ module id_stage (
         end
       end
 
-      // Exception packets retain PC/instruction metadata but cannot carry a
-      // younger architectural side effect into EX.
+      // Exception packets retain metadata but carry no side effects into EX.
       if (id_ex_d.exc.valid) begin
         id_ex_d.rs1_value = 32'b0;
         id_ex_d.rs2_value = 32'b0;
