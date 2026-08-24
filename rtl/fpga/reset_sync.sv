@@ -1,12 +1,8 @@
 
-// Asynchronous reset-event synchronizer followed by a fully synchronous
-// functional reset.
-//
-// Only reset_pipe_q sees the external asynchronous reset. The reset delivered
-// to the SoC is registered without an asynchronous control, so it can never
-// become an asynchronous control source for BRAM address/write logic. FPGA
-// initialization holds the functional reset active until the synchronizer has
-// observed STAGES consecutive inactive samples.
+// Asynchronous reset-event synchronizer with synchronous functional reset.
+// Only reset_pipe_q sees the external asynchronous input; the SoC reset has no
+// asynchronous control and therefore cannot feed BRAM control pins that way.
+// FPGA initialization holds reset until STAGES consecutive inactive samples.
 module reset_sync #(
   parameter int unsigned STAGES = 2
 ) (
@@ -18,9 +14,8 @@ module reset_sync #(
   (* ASYNC_REG = "TRUE", SHREG_EXTRACT = "NO" *)
   logic [STAGES-1:0] reset_pipe_q;
 
-  // This register is deliberately free of asynchronous set/reset. Its INIT
-  // value is synthesizable on the target FPGA and guarantees a reset state
-  // immediately after configuration, before the first board-clock edge.
+  // This register has no asynchronous control; its synthesizable INIT value
+  // guarantees reset immediately after FPGA configuration.
   logic functional_rst_q;
 
   initial begin
@@ -36,9 +31,8 @@ module reset_sync #(
     end
   end
 
-  // Both assertion and deassertion of the reset seen by the SoC occur only on
-  // a rising clock edge. In particular, an asynchronous button press cannot
-  // fan out from an async-reset flip-flop into inferred RAM control pins.
+  // SoC reset asserts and deasserts only on rising edges, preventing an
+  // asynchronous button event from reaching inferred RAM controls.
   always_ff @(posedge clk_i) begin
     functional_rst_q <= !reset_pipe_q[STAGES-1];
   end

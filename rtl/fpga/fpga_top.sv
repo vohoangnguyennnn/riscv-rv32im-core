@@ -1,10 +1,8 @@
 
 // MicroPhase A7-Lite R1.1 top for the TCM-based RV32IM SoC.
 //
-// The board supplies a 50 MHz clock on clk_50m_i. A Clocking Wizard generates
-// the 75 MHz SoC clock. Its two on-board green LEDs are wired active-low, while
-// FAIL/DONE are routed active-high to JP2 for an external indicator or logic
-// analyzer.
+// A Clocking Wizard converts the board's 50 MHz clock to 75 MHz. On-board green
+// LEDs are active-low; FAIL/DONE remain active-high on JP2.
 module fpga_top #(
   parameter logic [31:0] RESET_VECTOR      = 32'h0000_0000,
   parameter logic [31:0] TRAP_VECTOR       = 32'h0000_0100,
@@ -13,6 +11,7 @@ module fpga_top #(
   parameter string       TCM_INIT_FILE     = "",
   parameter logic [31:0] TEST_STATUS_ADDR  = TCM_BASE_ADDR + TCM_BYTES - 4,
   parameter logic [31:0] TEST_PASS_VALUE   = 32'h0000_0001,
+  parameter int unsigned SOC_CLK_FREQ_HZ   = 75_000_000,
   parameter int unsigned RESET_SYNC_STAGES = 2,
   parameter int unsigned HEARTBEAT_WIDTH    = 24
 ) (
@@ -60,8 +59,7 @@ module fpga_top #(
     end
   end
 
-  // D6/D5 source current from 3.3 V and therefore illuminate when the FPGA
-  // pin is low. JP2 FAIL/DONE retain ordinary active-high polarity.
+  // D6/D5 illuminate low; JP2 FAIL/DONE retain active-high polarity.
   always_comb begin
     heartbeat = 1'b0;
     led1_n_o  = 1'b1;
@@ -84,11 +82,19 @@ module fpga_top #(
     .TCM_BYTES         (TCM_BYTES),
     .TCM_BASE_ADDR     (TCM_BASE_ADDR),
     .TCM_INIT_FILE     (TCM_INIT_FILE),
+    .UART_CLK_FREQ_HZ  (SOC_CLK_FREQ_HZ),
     .TEST_STATUS_ADDR  (TEST_STATUS_ADDR),
     .TEST_PASS_VALUE   (TEST_PASS_VALUE)
   ) u_soc (
     .clk_i              (clk_75m),
     .rst_i              (soc_rst),
+    // UART/GPIO pins are unassigned on this wrapper; keep inputs benign while
+    // soc_tcm_top retains the full I/O contract for future board mappings.
+    .uart_rx_i          (1'b1),
+    .uart_tx_o          (),
+    .gpio_in_i          (32'b0),
+    .gpio_out_o         (),
+    .gpio_oe_o          (),
     .test_done_o        (test_done),
     .test_pass_o        (test_pass),
     .test_fail_o        (test_fail),
@@ -104,6 +110,7 @@ module fpga_top #(
     .trace_mem_wdata_o  (),
     .trace_trap_o       (),
     .trace_cause_o      (),
+    .trace_is_interrupt_o (),
     .trace_control_o    (),
     .trace_taken_o      (),
     .trace_target_o     (),
