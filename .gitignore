@@ -25,6 +25,8 @@ __pycache__/
 *.runs/
 *.sim/
 /vivado_review_*/
+/.Xil/
+/Report_vivado/
 
 # Local editor/project metadata
 /.sigasi/
