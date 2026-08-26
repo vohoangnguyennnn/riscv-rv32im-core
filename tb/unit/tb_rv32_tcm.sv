@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 module tb_rv32_tcm;
 

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 module tb_hazard_unit;
 
@@ -189,7 +188,7 @@ module tb_hazard_unit;
     check_outputs(1'b1, 1'b0, "load to store data");
 
     // ----------------------------------------------------------------------
-    // General CSR serialization
+    // Address-aware CSR serialization
     // ----------------------------------------------------------------------
     clear_inputs();
     id_valid       = 1'b1;
@@ -200,6 +199,10 @@ module tb_hazard_unit;
 
     id_ex.ctrl.csr_cmd = CSR_RWI;
     check_outputs(1'b0, 1'b1, "CSRRWI zimm zero remains a writer");
+
+    id_ex.insn[31:20] = CSR_MTVEC;
+    check_outputs(1'b0, 1'b0, "ID/EX unrelated CSR write does not stall");
+    id_ex.insn[31:20] = CSR_MSCRATCH;
 
     id_ex.ctrl.csr_cmd = CSR_RS;
     id_ex.rs1          = 5'd7;
@@ -227,10 +230,22 @@ module tb_hazard_unit;
     enable_ex_mem_csr_writer(CSR_MSCRATCH);
     check_outputs(1'b0, 1'b1, "EX/MEM CSR writer");
 
-    // General CSR consumers serialize conservatively even when the older
-    // writer targets a different CSR.
+    // A different architectural CSR is independent and must not create a
+    // false dependency.
     ex_mem.csr_addr = CSR_MTVEC;
-    check_outputs(1'b0, 1'b1, "CSR address-independent serialization");
+    check_outputs(1'b0, 1'b0, "EX/MEM unrelated CSR write does not stall");
+
+    // RV32 counter halves alias the same 64-bit underlying state.
+    id_csr_addr       = CSR_MCYCLE;
+    ex_mem.csr_addr   = CSR_MCYCLEH;
+    check_outputs(1'b0, 1'b1, "mcycle low waits for high-half writer");
+
+    id_csr_addr       = CSR_MCYCLEH;
+    ex_mem.csr_addr   = CSR_MCYCLE;
+    check_outputs(1'b0, 1'b1, "mcycle high waits for low-half writer");
+
+    id_csr_addr       = CSR_MTVEC;
+    ex_mem.csr_addr   = CSR_MTVEC;
 
     ex_mem.csr_write = 1'b0;
     check_outputs(1'b0, 1'b0, "EX/MEM CSR write suppressed");
@@ -310,6 +325,7 @@ module tb_hazard_unit;
     clear_inputs();
     enable_id_consumer(1'b1, 1'b0);
     id_ctrl.csr_cmd = CSR_RW;
+    id_csr_addr     = CSR_MSCRATCH;
     enable_id_ex_load(id_rs1);
     enable_ex_mem_csr_writer(CSR_MSCRATCH);
     check_outputs(1'b1, 1'b1, "simultaneous load and CSR hazards");

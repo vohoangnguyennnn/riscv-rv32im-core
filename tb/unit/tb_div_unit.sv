@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 module tb_div_unit;
 
@@ -104,10 +103,17 @@ module tb_div_unit;
     input logic [31:0] test_rhs
   );
     logic signed_op;
+    logic signed_overflow;
+    logic [31:0] lhs_magnitude;
+    logic [31:0] rhs_magnitude;
     begin
       signed_op = (test_op == MDU_DIV) || (test_op == MDU_REM);
+      signed_overflow = signed_op && (test_lhs == 32'h8000_0000) && (test_rhs == 32'hffff_ffff);
+      lhs_magnitude = (signed_op && test_lhs[31]) ? (~test_lhs + 32'd1) : test_lhs;
+      rhs_magnitude = (signed_op && test_rhs[31]) ? (~test_rhs + 32'd1) : test_rhs;
       return (test_rhs == 32'b0)
-          || (signed_op && (test_lhs == 32'h8000_0000) && (test_rhs == 32'hffff_ffff));
+          || signed_overflow
+          || ((lhs_magnitude < rhs_magnitude) && (test_rhs != 32'b0) && !signed_overflow);
     end
   endfunction
 
@@ -354,6 +360,16 @@ module tb_div_unit;
     run_case(MDU_DIV,  32'h8000_0000, 32'hffff_ffff, 0, "DIV signed overflow", unused_result);
     run_case(MDU_REM,  32'h8000_0000, 32'hffff_ffff, 0, "REM signed overflow", unused_result);
     run_case(MDU_DIVU, 32'd100,       32'd7,         4, "normal DIVU backpressure", unused_result);
+
+    run_case(MDU_DIV,  32'd5,         32'd13,        0, "DIV small positive magnitude", unused_result);
+    run_case(MDU_DIV,  32'hffff_fffb, 32'd13,        0, "DIV small negative magnitude", unused_result);
+    run_case(MDU_DIVU, 32'd7,         32'd29,        0, "DIVU small magnitude", unused_result);
+    run_case(MDU_REM,  32'd5,         32'd13,        0, "REM small positive magnitude", unused_result);
+    run_case(MDU_REM,  32'hffff_fffb, 32'd13,        0, "REM small negative magnitude", unused_result);
+    run_case(MDU_REMU, 32'd7,         32'd29,        0, "REMU small magnitude", unused_result);
+    check_signed_identity(32'd5,         32'd13,        "small positive magnitude identity");
+    check_signed_identity(32'hffff_fffb, 32'd13,        "small negative magnitude identity");
+    check_unsigned_identity(32'd7,       32'd29,        "small unsigned magnitude identity");
 
     // Directed sign and rounding-toward-zero vectors.
     check_signed_identity(32'd7,         32'd3,         "positive by positive");

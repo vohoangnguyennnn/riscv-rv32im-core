@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 module tb_ex_stage;
 
@@ -405,7 +404,6 @@ module tb_ex_stage;
     result_ready             = 1'b1;
     expected_redirect.valid  = 1'b1;
     expected_redirect.target = 32'h0000_3008;
-    expected_redirect.origin = REDIRECT_FROM_EX;
     #1;
     check_outputs(
       expected_ex_mem,
@@ -474,7 +472,6 @@ module tb_ex_stage;
     expected_ex_mem.control_target = 32'h0000_3820;
     expected_redirect.valid        = 1'b1;
     expected_redirect.target       = 32'h0000_3820;
-    expected_redirect.origin       = REDIRECT_FROM_EX;
     check_outputs(
       expected_ex_mem,
       expected_redirect,
@@ -518,7 +515,6 @@ module tb_ex_stage;
     expected_ex_mem.control_target = 32'h0000_5004;
     expected_redirect.valid        = 1'b1;
     expected_redirect.target       = 32'h0000_5004;
-    expected_redirect.origin       = REDIRECT_FROM_EX;
     check_outputs(
       expected_ex_mem,
       expected_redirect,
@@ -771,13 +767,13 @@ module tb_ex_stage;
     expected_ex_mem.pc             = id_ex.pc;
     expected_ex_mem.insn           = INSN_MRET;
     expected_ex_mem.mem_size       = MEM_WORD;
+    expected_ex_mem.is_mret        = 1'b1;
     expected_ex_mem.control        = 1'b1;
     expected_ex_mem.control_taken  = 1'b1;
     expected_ex_mem.control_target = 32'h0000_7000;
     expected_redirect              = '0;
     expected_redirect.valid        = 1'b1;
     expected_redirect.target       = 32'h0000_7000;
-    expected_redirect.origin       = REDIRECT_FROM_EX;
     check_outputs(
       expected_ex_mem,
       expected_redirect,
@@ -807,6 +803,7 @@ module tb_ex_stage;
     expected_ex_mem.exc.valid       = 1'b1;
     expected_ex_mem.exc.cause       = EXC_INST_ADDR_MISALIGNED;
     expected_ex_mem.exc.tval        = 32'h0000_7002;
+    expected_ex_mem.is_mret         = 1'b0;
     expected_redirect               = '0;
     #1;
     check_outputs(

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 module tb_decoder;
 
@@ -341,6 +340,11 @@ module tb_decoder;
     expected_ctrl.is_mret = 1'b1;
     check(INSN_MRET, IMM_NONE, 1'b0, "MRET");
 
+    // WFI is architecturally legal but intentionally behaves as a
+    // side-effect-free NOP because this core has no low-power wait state.
+    set_safe_expected();
+    check(INSN_WFI, IMM_NONE, 1'b0, "WFI legal NOP");
+
     // Six Zicsr operations. CSR address support is checked later by csr_file;
     // decoder is responsible only for validating the instruction encoding.
     check_csr(CSR_MTVEC, FUNCT3_CSRRW,  1'b1, CSR_RW,  "CSRRW");
@@ -374,7 +378,8 @@ module tb_decoder;
     check_illegal(32'h0000_100f, "FENCE.I out of scope");
     check_illegal(make_i(12'h123, 3'b100, OPCODE_SYSTEM),
                   "SYSTEM reserved funct3");
-    check_illegal(32'h1050_0073, "WFI out of scope");
+    check_illegal(INSN_WFI | 32'h0000_0080, "WFI with nonzero rd");
+    check_illegal(INSN_WFI | 32'h0000_8000, "WFI with nonzero rs1");
     check_illegal(32'h1020_0073, "SRET out of scope");
     check_illegal(32'h0000_00f3, "malformed ECALL");
     check_illegal(32'hffff_ffff, "unknown major opcode");

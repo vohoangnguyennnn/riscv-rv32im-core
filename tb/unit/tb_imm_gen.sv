@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 module tb_imm_gen;
 

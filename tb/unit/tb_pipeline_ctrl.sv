@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 module tb_pipeline_ctrl;
 
@@ -26,9 +25,11 @@ module tb_pipeline_ctrl;
   logic      rst;
   logic      load_use;
   logic      csr_dep;
+  logic      irq_state_wait;
   logic      ex_wait;
   logic      mem_wait;
   logic      id_exception;
+  logic      id_interrupt;
   logic      ex_exception;
   logic      mem_exception;
   logic      wb_trap;
@@ -56,9 +57,11 @@ module tb_pipeline_ctrl;
     .rst_i                (rst),
     .load_use_i           (load_use),
     .csr_dep_i            (csr_dep),
+    .irq_state_wait_i     (irq_state_wait),
     .ex_wait_i            (ex_wait),
     .mem_wait_i           (mem_wait),
     .id_exception_i       (id_exception),
+    .id_interrupt_i       (id_interrupt),
     .ex_exception_i       (ex_exception),
     .mem_exception_i      (mem_exception),
     .wb_trap_i            (wb_trap),
@@ -113,9 +116,11 @@ module tb_pipeline_ctrl;
       rst              = 1'b0;
       load_use         = 1'b0;
       csr_dep           = 1'b0;
+      irq_state_wait    = 1'b0;
       ex_wait           = 1'b0;
       mem_wait          = 1'b0;
       id_exception      = 1'b0;
+      id_interrupt      = 1'b0;
       ex_exception      = 1'b0;
       mem_exception     = 1'b0;
       wb_trap           = 1'b0;
@@ -174,9 +179,8 @@ module tb_pipeline_ctrl;
     expected = normal_outputs();
     check(expected, "normal advance");
 
-    // A disabled redirect ignores target/origin payload completely.
+    // A disabled redirect ignores the target payload completely.
     control_redirect.target = 32'hdead_beef;
-    control_redirect.origin = REDIRECT_FROM_EX;
     check(expected, "invalid redirect payload ignored");
 
     // Load-use and CSR dependencies share the same hold + ID/EX bubble action.
@@ -195,6 +199,16 @@ module tb_pipeline_ctrl;
     load_use = 1'b1;
     check(expected, "simultaneous ID hazards");
 
+    // Interrupt-state writers serialize all younger ID events until their WB
+    // commit makes the post-commit MIE/MTIE state unambiguous.
+    clear_events();
+    irq_state_wait = 1'b1;
+    check(expected, "interrupt-state serialization");
+
+    id_exception = 1'b1;
+    id_interrupt = 1'b1;
+    check(expected, "interrupt-state serialization beats ID events");
+
     // EX wait holds ID/EX and lets the older EX/MEM entry advance before
     // replacing it with a bubble.
     clear_events();
@@ -209,8 +223,8 @@ module tb_pipeline_ctrl;
     // EX wait is older than both an EX redirect event and any ID dependency.
     control_redirect.valid  = 1'b1;
     control_redirect.target = 32'h0000_2000;
-    control_redirect.origin = REDIRECT_FROM_EX;
     load_use                = 1'b1;
+    id_interrupt            = 1'b1;
     check(expected, "EX wait beats redirect and ID hazard");
 
     // MEM wait retains EX/MEM. MEM/WB is cleared after its previous instruction
@@ -225,11 +239,10 @@ module tb_pipeline_ctrl;
     expected.mem_wb_flush   = 1'b1;
     check(expected, "MEM wait");
 
-    // EX-origin redirect squashes both younger pipeline packets.
+    // EX redirect squashes both younger pipeline packets.
     clear_events();
     control_redirect.valid  = 1'b1;
     control_redirect.target = 32'h1234_5678;
-    control_redirect.origin = REDIRECT_FROM_EX;
     expected                = normal_outputs();
     expected.if_id_flush    = 1'b1;
     expected.id_ex_flush    = 1'b1;
@@ -237,11 +250,20 @@ module tb_pipeline_ctrl;
     expected.redirect_pc    = 32'h1234_5678;
     check(expected, "EX redirect");
 
-    // The dormant Option-A contract keeps its ID control packet and squashes
-    // only the younger IF/ID entry.
-    control_redirect.origin = REDIRECT_FROM_ID;
-    expected.id_ex_flush    = 1'b0;
-    check(expected, "ID redirect flush mask");
+    // An eligible interrupt selected at the ID instruction boundary moves the
+    // same single packet as an ID exception, but remains a distinct controller
+    // event for priority review and waveform debug.
+    clear_events();
+    id_interrupt           = 1'b1;
+    expected               = normal_outputs();
+    expected.pc_enable     = 1'b0;
+    expected.if_id_flush   = 1'b1;
+    check(expected, "ID interrupt action");
+
+    // The interrupt packet has already replaced the ID instruction controls,
+    // so it advances instead of accepting a younger dependency bubble.
+    csr_dep = 1'b1;
+    check(expected, "ID interrupt beats hazard");
 
     // An ID exception advances to ID/EX and starts precise draining.
     clear_events();
@@ -264,9 +286,9 @@ module tb_pipeline_ctrl;
     // Younger redirects and ID hazards are ignored throughout the drain.
     control_redirect.valid  = 1'b1;
     control_redirect.target = 32'hffff_0000;
-    control_redirect.origin = REDIRECT_FROM_EX;
     load_use                = 1'b1;
     id_exception            = 1'b1;
+    id_interrupt            = 1'b1;
     check(expected, "drain suppresses younger events");
 
     // An older multi-cycle EX operation keeps its normal hold/bubble action
@@ -325,7 +347,6 @@ module tb_pipeline_ctrl;
     ex_wait                 = 1'b1;
     control_redirect.valid  = 1'b1;
     control_redirect.target = 32'h0000_4000;
-    control_redirect.origin = REDIRECT_FROM_EX;
     check(expected, "EX exception priority");
 
     // MEM wait is older than an EX exception.
@@ -364,8 +385,9 @@ module tb_pipeline_ctrl;
     clear_events();
     control_redirect.valid  = 1'b1;
     control_redirect.target = 32'h0000_9000;
-    control_redirect.origin = REDIRECT_FROM_EX;
+    irq_state_wait          = 1'b1;
     id_exception            = 1'b1;
+    id_interrupt            = 1'b1;
     load_use                = 1'b1;
     expected                = normal_outputs();
     expected.if_id_flush    = 1'b1;
@@ -409,6 +431,23 @@ module tb_pipeline_ctrl;
     clear_events();
     expected = normal_outputs();
     check(expected, "final drain clear");
+
+    // Finally prove that the dedicated interrupt action, rather than only the
+    // synchronous-exception action above, latches and clears precise drain.
+    id_interrupt = 1'b1;
+    tick();
+    clear_events();
+    expected                = normal_outputs();
+    expected.pc_enable      = 1'b0;
+    expected.if_id_enable   = 1'b0;
+    expected.trap_drain     = 1'b1;
+    check(expected, "ID interrupt enters drain");
+
+    wb_trap = 1'b1;
+    tick();
+    clear_events();
+    expected = normal_outputs();
+    check(expected, "interrupt drain clear");
 
     $display("PASS: %0d pipeline-controller checks", checks);
     $finish;
