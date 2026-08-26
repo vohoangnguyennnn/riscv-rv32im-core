@@ -9,6 +9,12 @@ BAREMETAL_PLUSARGS ?=
 ISA_PLUSARGS ?=
 ISA_TRACE_DIR ?=
 PYTHON ?= python3
+CROSS_COMPILE ?= riscv64-unknown-elf-
+COREMARK_CC ?= $(CROSS_COMPILE)gcc
+COREMARK_ITERATIONS ?= 0
+COREMARK_MAX_CYCLES ?= 2000000000
+COREMARK_MAX_TRACE_EVENTS ?= 2000000000
+FREERTOS_MAX_CYCLES ?= 1500000
 
 # RISC-V Architectural Certification Tests (ACT4). Source, generated ELFs,
 # tool caches, and RTL diagnostics stay outside the repository. The exact ACT4
@@ -88,9 +94,19 @@ VERILATOR_LINT_FLAGS := \
 
 CORE_MANIFEST := files/core.f
 CORE_SOURCES := $(shell sed -e '/^[[:space:]]*\#/d' -e '/^[[:space:]]*$$/d' $(CORE_MANIFEST))
+ASSERTION_SOURCES := \
+	tb/assertions/rv32_mem_protocol_sva.sv \
+	tb/assertions/rv32_core_retirement_sva.sv \
+	tb/assertions/rv32_core_interrupt_sva.sv \
+	tb/assertions/rv32_core_bind.sv
 TCM_SOURCES := $(CORE_SOURCES) rtl/soc/rv32_tcm.sv
-SOC_SOURCES := $(TCM_SOURCES) rtl/soc/soc_tcm_top.sv
-FPGA_SOURCES := $(SOC_SOURCES) rtl/fpga/reset_sync.sv rtl/fpga/fpga_top.sv
+SOC_SOURCES := \
+	$(TCM_SOURCES) \
+	rtl/soc/rv32_mtimer.sv \
+	rtl/soc/rv32_uart.sv \
+	rtl/soc/rv32_gpio.sv \
+	rtl/soc/rv32_mem_demux.sv \
+	rtl/soc/soc_tcm_top.sv
 
 UNIT_TESTS := \
 	tb_alu \
@@ -100,6 +116,10 @@ UNIT_TESTS := \
 	tb_regfile \
 	tb_reset_sync \
 	tb_rv32_tcm \
+	tb_rv32_mtimer \
+	tb_rv32_uart \
+	tb_rv32_gpio \
+	tb_rv32_mem_demux \
 	tb_lsu \
 	tb_if_stage \
 	tb_id_stage \
@@ -114,18 +134,25 @@ UNIT_TESTS := \
 GATE4_TESTS := \
 	tb_pipeline_forwarding \
 	tb_pipeline_memory_wait \
-	tb_pipeline_control
+	tb_core_control_flow
+
+ASSERTION_TESTS := \
+	tb_pipeline_memory_wait \
+	tb_core_control_flow \
+	tb_timer_interrupt_core
 
 INTEGRATION_TESTS := \
 	tb_rv32_core \
 	tb_csr_core \
+	tb_timer_interrupt_core \
 	tb_soc_tcm_top \
-	tb_fpga_top \
 	$(GATE4_TESTS)
 
-FPGA_TESTS := tb_reset_sync tb_soc_tcm_top tb_fpga_top
+FPGA_TESTS := tb_reset_sync tb_soc_tcm_top
 
 ALL_TESTS := $(UNIT_TESTS) $(INTEGRATION_TESTS)
+SOFTWARE_INTEGRATION_TESTS := tb_freertos_soc
+TOTAL_RTL_TESTS := $(ALL_TESTS) $(SOFTWARE_INTEGRATION_TESTS)
 
 # Curated waveform portfolio aligned with Gates 2-5 of the architecture plan.
 # Bare-metal/ISA images use dedicated targets because they need runtime images.
@@ -136,11 +163,11 @@ QUESTA_GUI_TESTS := \
 	tb_pipeline_ctrl \
 	tb_pipeline_forwarding \
 	tb_pipeline_memory_wait \
-	tb_pipeline_control \
+	tb_core_control_flow \
 	tb_csr_core \
+	tb_timer_interrupt_core \
 	tb_rv32_core \
-	tb_soc_tcm_top \
-	tb_fpga_top
+	tb_soc_tcm_top
 
 include sw/tests/programs.mk
 include sw/isa/tests.mk
@@ -171,6 +198,10 @@ tb_branch_unit_SRCS := rtl/core/rv32_pkg.sv rtl/core/branch_unit.sv tb/unit/tb_b
 tb_regfile_SRCS := rtl/core/regfile.sv tb/unit/tb_regfile.sv
 tb_reset_sync_SRCS := rtl/fpga/reset_sync.sv tb/unit/tb_reset_sync.sv
 tb_rv32_tcm_SRCS := rtl/core/rv32_mem_if.sv rtl/soc/rv32_tcm.sv tb/unit/tb_rv32_tcm.sv
+tb_rv32_mtimer_SRCS := rtl/core/rv32_mem_if.sv rtl/soc/rv32_mtimer.sv tb/unit/tb_rv32_mtimer.sv
+tb_rv32_uart_SRCS := rtl/core/rv32_mem_if.sv rtl/soc/rv32_uart.sv tb/unit/tb_rv32_uart.sv
+tb_rv32_gpio_SRCS := rtl/core/rv32_mem_if.sv rtl/soc/rv32_gpio.sv tb/unit/tb_rv32_gpio.sv
+tb_rv32_mem_demux_SRCS := rtl/core/rv32_mem_if.sv rtl/soc/rv32_mem_demux.sv tb/unit/tb_rv32_mem_demux.sv
 tb_lsu_SRCS := rtl/core/rv32_pkg.sv rtl/core/rv32_mem_if.sv rtl/core/lsu.sv tb/unit/tb_lsu.sv
 tb_if_stage_SRCS := rtl/core/rv32_pkg.sv rtl/core/rv32_mem_if.sv rtl/core/if_stage.sv tb/unit/tb_if_stage.sv
 tb_id_stage_SRCS := \
@@ -194,30 +225,40 @@ tb_ex_stage_SRCS := \
 	tb/unit/tb_ex_stage.sv
 tb_pipeline_ctrl_SRCS := rtl/core/rv32_pkg.sv rtl/core/pipeline_ctrl.sv tb/unit/tb_pipeline_ctrl.sv
 tb_csr_SRCS := rtl/core/rv32_pkg.sv rtl/core/csr_file.sv tb/unit/tb_csr.sv
-tb_rv32_core_SRCS := $(TCM_SOURCES) tb/integration/tb_rv32_core.sv
-tb_csr_core_SRCS := $(TCM_SOURCES) tb/integration/tb_csr_core.sv
+tb_rv32_core_SRCS := $(TCM_SOURCES) $(ASSERTION_SOURCES) tb/integration/tb_rv32_core.sv
+tb_csr_core_SRCS := $(TCM_SOURCES) $(ASSERTION_SOURCES) tb/integration/tb_csr_core.sv
+tb_timer_interrupt_core_SRCS := \
+	$(TCM_SOURCES) \
+	$(ASSERTION_SOURCES) \
+	tb/integration/tb_timer_interrupt_core.sv
 tb_soc_tcm_top_SRCS := \
 	$(SOC_SOURCES) \
+	$(ASSERTION_SOURCES) \
 	tb/integration/tb_soc_tcm_top.sv
-tb_fpga_top_SRCS := \
-	$(FPGA_SOURCES) \
-	tb/integration/tb_fpga_top.sv
 tb_pipeline_forwarding_SRCS := \
 	$(TCM_SOURCES) \
+	$(ASSERTION_SOURCES) \
 	tb/common/rv32_tb_pkg.sv \
 	tb/integration/tb_pipeline_forwarding.sv
 tb_pipeline_memory_wait_SRCS := \
 	$(CORE_SOURCES) \
+	$(ASSERTION_SOURCES) \
 	tb/common/rv32_tb_pkg.sv \
 	tb/common/rv32_delayed_mem.sv \
 	tb/integration/tb_pipeline_memory_wait.sv
-tb_pipeline_control_SRCS := \
+tb_core_control_flow_SRCS := \
 	$(TCM_SOURCES) \
+	$(ASSERTION_SOURCES) \
 	tb/common/rv32_tb_pkg.sv \
-	tb/integration/tb_pipeline_control.sv
+	tb/integration/tb_core_control_flow.sv
 tb_baremetal_SRCS := \
 	$(TCM_SOURCES) \
+	$(ASSERTION_SOURCES) \
 	tb/integration/tb_baremetal.sv
+tb_freertos_soc_SRCS := \
+	$(SOC_SOURCES) \
+	$(ASSERTION_SOURCES) \
+	tb/integration/tb_freertos_soc.sv
 
 # Every integration build expands CORE_SOURCES at parse time. Preserve the
 # manifest itself as a dependency so source removal or reordering also causes
@@ -226,23 +267,26 @@ $(foreach test,$(ALL_TESTS),$(eval $(test)_BUILD_DEPS :=))
 $(foreach test,$(INTEGRATION_TESTS),$(eval $(test)_BUILD_DEPS := $(CORE_MANIFEST)))
 
 BAREMETAL_SIM := $(BUILD_DIR)/tb_baremetal/Vtb_baremetal
+FREERTOS_SIM := $(BUILD_DIR)/tb_freertos_soc/Vtb_freertos_soc
 ACT4_SIM := $(BUILD_DIR)/tb_baremetal_act4/Vtb_baremetal_act4
 
 .DEFAULT_GOAL := test
 
-.PHONY: all test rtl-check-tools lint unit integration gate4 fpga baremetal software-images \
+.PHONY: all test rtl-check-tools lint unit integration gate4 assertions fpga baremetal software-images \
+	freertos freertos-images fpga-freertos-images \
+	benchmark benchmark-images coremark coremark-images \
 	isa isa-images isa-rv32ui-arithmetic isa-rv32ui-control \
 	isa-rv32ui-memory isa-rv32ui isa-rv32um-multiply isa-rv32um-divide isa-rv32um \
 	questa-list questa-compile questa-run questa-gui questa-check \
-	questa-baremetal-gui questa-isa-gui questa-clean \
+	questa-baremetal-gui questa-freertos-run questa-freertos-gui questa-isa-gui questa-clean \
 	act4 act4-check-tools act4-fetch act4-config act4-z3 act4-generate \
 	act4-sim act4-run act4-test act4-clean \
-	list help clean $(ALL_TESTS) $(BAREMETAL_TARGETS) $(ISA_TARGETS)
+	list help clean $(ALL_TESTS) $(SOFTWARE_INTEGRATION_TESTS) $(BAREMETAL_TARGETS) $(ISA_TARGETS)
 
 all: test
 
-test: lint unit integration baremetal isa
-	@echo "[PASS] RTL lint, $(words $(ALL_TESTS)) RTL simulations, $(words $(BAREMETAL_PROGRAMS)) bare-metal programs, and $(words $(ISA_PROGRAMS)) ISA tests completed"
+test: lint unit integration baremetal freertos isa
+	@echo "[PASS] RTL lint, $(words $(TOTAL_RTL_TESTS)) RTL simulations (including FreeRTOS SoC bring-up), $(words $(BAREMETAL_PROGRAMS)) bare-metal programs, and $(words $(ISA_PROGRAMS)) ISA tests completed"
 
 rtl-check-tools:
 	@command -v $(VERILATOR) >/dev/null 2>&1 || { \
@@ -256,14 +300,24 @@ lint: rtl-check-tools
 	@echo "[LINT] rv32_tcm"
 	@$(VERILATOR) $(VERILATOR_LINT_FLAGS) --top-module rv32_tcm \
 		rtl/core/rv32_mem_if.sv rtl/soc/rv32_tcm.sv
+	@echo "[LINT] rv32_mtimer"
+	@$(VERILATOR) $(VERILATOR_LINT_FLAGS) --top-module rv32_mtimer \
+		rtl/core/rv32_mem_if.sv rtl/soc/rv32_mtimer.sv
+	@echo "[LINT] rv32_uart"
+	@$(VERILATOR) $(VERILATOR_LINT_FLAGS) --top-module rv32_uart \
+		rtl/core/rv32_mem_if.sv rtl/soc/rv32_uart.sv
+	@echo "[LINT] rv32_gpio"
+	@$(VERILATOR) $(VERILATOR_LINT_FLAGS) --top-module rv32_gpio \
+		rtl/core/rv32_mem_if.sv rtl/soc/rv32_gpio.sv
+	@echo "[LINT] rv32_mem_demux"
+	@$(VERILATOR) $(VERILATOR_LINT_FLAGS) --top-module rv32_mem_demux \
+		rtl/core/rv32_mem_if.sv rtl/soc/rv32_mem_demux.sv
 	@echo "[LINT] soc_tcm_top"
 	@$(VERILATOR) $(VERILATOR_LINT_FLAGS) --top-module soc_tcm_top \
 		$(SOC_SOURCES)
 	@echo "[LINT] reset_sync"
 	@$(VERILATOR) $(VERILATOR_LINT_FLAGS) --top-module reset_sync \
 		rtl/fpga/reset_sync.sv
-	@echo "[LINT] fpga_top"
-	@$(VERILATOR) $(VERILATOR_LINT_FLAGS) --top-module fpga_top -f files/fpga.f
 
 unit: $(UNIT_TESTS)
 	@echo "[PASS] $(words $(UNIT_TESTS)) unit tests completed"
@@ -274,14 +328,58 @@ integration: $(INTEGRATION_TESTS)
 gate4: $(GATE4_TESTS)
 	@echo "[PASS] Gate 4 forwarding, wait-state, control, and precise-squash tests completed"
 
+assertions: $(ASSERTION_TESTS)
+	@echo "[PASS] concurrent protocol, retirement, and precise-interrupt assertions completed"
+
 fpga: $(FPGA_TESTS)
-	@echo "[PASS] FPGA reset, SoC boundary, BRAM image, and LED smoke tests completed"
+	@echo "[PASS] FPGA-support reset and SoC/TCM simulations completed"
 
 software-images:
-	@$(MAKE) -C sw BUILD_DIR=$(SOFTWARE_BUILD_DIR) all
+	@$(MAKE) -C sw BUILD_DIR=$(SOFTWARE_BUILD_DIR) baremetal-images
+
+freertos-images:
+	@$(MAKE) -C sw BUILD_DIR=$(SOFTWARE_BUILD_DIR) freertos-images
+
+# Human-observable board image. Keep it separate from the bounded 2 ms
+# simulation image so the release payload cannot silently reuse test firmware.
+fpga-freertos-images:
+	@$(MAKE) -B -C sw BUILD_DIR=../build/fpga-freertos \
+		FREERTOS_CPU_CLOCK_HZ=75000000 \
+		FREERTOS_BLINK_PERIOD_MS=250 freertos-images
+
+freertos: freertos-images $(FREERTOS_SIM)
+	@echo "[RUN]   freertos-demo"
+	@$(FREERTOS_SIM) \
+		+mem=$(SOFTWARE_BUILD_DIR)/freertos_demo.mem \
+		+max_cycles=$(FREERTOS_MAX_CYCLES)
+
+tb_freertos_soc: freertos
 
 baremetal: $(BAREMETAL_TARGETS)
 	@echo "[PASS] $(words $(BAREMETAL_PROGRAMS)) bare-metal software tests completed"
+
+benchmark-images:
+	@$(MAKE) -C sw BUILD_DIR=$(SOFTWARE_BUILD_DIR) \
+		$(addprefix $(SOFTWARE_BUILD_DIR)/,$(addsuffix .mem,$(BENCHMARK_PROGRAMS)))
+
+benchmark: benchmark-images $(BAREMETAL_SIM)
+	@$(PYTHON) tools/run_benchmarks.py \
+		--sim "$(BAREMETAL_SIM)" \
+		--image-dir "$(SOFTWARE_BUILD_DIR)" \
+		--output docs/performance.md
+
+coremark-images:
+	@$(MAKE) -C sw BUILD_DIR=$(SOFTWARE_BUILD_DIR) \
+		COREMARK_ITERATIONS=$(COREMARK_ITERATIONS) coremark-images
+
+coremark: coremark-images $(BAREMETAL_SIM)
+	@$(PYTHON) tools/run_coremark.py \
+		--sim "$(BAREMETAL_SIM)" \
+		--image-dir "$(SOFTWARE_BUILD_DIR)" \
+		--compiler "$(COREMARK_CC)" \
+		--max-cycles $(COREMARK_MAX_CYCLES) \
+		--max-trace-events $(COREMARK_MAX_TRACE_EVENTS) \
+		--output docs/coremark.md
 
 isa-images:
 	@$(MAKE) -C sw/isa BUILD_DIR=$(ISA_BUILD_DIR) all
@@ -311,7 +409,7 @@ isa: isa-rv32ui isa-rv32um
 	@echo "[PASS] Gate 6 ISA regression: $(words $(ISA_PROGRAMS)) independent programs completed"
 
 list:
-	@printf '%s\n' $(ALL_TESTS) $(BAREMETAL_TARGETS) $(ISA_TARGETS)
+	@printf '%s\n' $(TOTAL_RTL_TESTS) $(BAREMETAL_TARGETS) $(ISA_TARGETS)
 
 help:
 	@echo "RV32IM RTL regression targets"
@@ -320,8 +418,13 @@ help:
 	@echo "  make unit         Run all unit tests"
 	@echo "  make integration  Run all core integration tests"
 	@echo "  make gate4        Run the Gate 4 directed acceptance suite"
-	@echo "  make fpga         Run FPGA reset and wrapper smoke tests"
+	@echo "  make assertions   Run concurrent protocol/retirement SVA stress tests"
+	@echo "  make fpga         Run reset and SoC/TCM deployment-support tests"
 	@echo "  make baremetal    Build and run all freestanding software tests"
+	@echo "  make freertos     Build and run the blink + UART echo FreeRTOS SoC demo"
+	@echo "  make fpga-freertos-images  Build the 75 MHz, 250 ms-blink FPGA FreeRTOS image"
+	@echo "  make benchmark    Run four CPI/IPC microbenchmarks and write docs/performance.md"
+	@echo "  make coremark     Run standard 2K performance/validation seeds and write docs/coremark.md"
 	@echo "  make baremetal-X  Build and run one software test (smoke or trap)"
 	@echo "  make isa          Run the complete Gate 6 RV32I/RV32M ISA suite"
 	@echo "  make isa-rv32ui   Run all in-scope upstream rv32ui tests"
@@ -335,6 +438,7 @@ help:
 	@echo "  make questa-gui TEST=tb_rv32_core  Open the curated waveform in Questa GUI"
 	@echo "  make questa-check Run the curated Questa portfolio in batch mode"
 	@echo "  make questa-baremetal-gui PROGRAM=smoke  Debug one bare-metal image"
+	@echo "  make questa-freertos-gui  Debug the FreeRTOS SoC demo"
 	@echo "  make questa-isa-gui ISA_TEST=rv32ui-add  Debug one ISA image"
 	@echo "  make list         List every available simulation test"
 	@echo "  make clean        Remove local Verilator, software, ISA, Questa, and ACT4 results"
@@ -476,6 +580,7 @@ QUESTA_BATCH_DO = $(REPO_ROOT)/sim/questa/run_batch.do
 questa-list:
 	@printf '%s\n' $(QUESTA_GUI_TESTS)
 	@echo "tb_baremetal (use questa-baremetal-gui or set QUESTA_PLUSARGS)"
+	@echo "tb_freertos_soc (use questa-freertos-run/questa-freertos-gui)"
 
 questa-compile:
 	@command -v $(QUESTA_VLIB) >/dev/null 2>&1 || { \
@@ -497,7 +602,8 @@ questa-compile:
 	fi
 	@cd "$(QUESTA_TEST_DIR)" && $(QUESTA_VMAP) work "$(QUESTA_TEST_DIR)/work"
 	@echo "[QUESTA BUILD] $(TEST)"
-	@$(QUESTA_VLOG) -ini "$(QUESTA_MODELSIM_INI)" -sv -work work \
+	@$(QUESTA_VLOG) -ini "$(QUESTA_MODELSIM_INI)" -sv -mfcu \
+		-cuname "$(TEST)_cu" -work work \
 		$(foreach src,$(QUESTA_TEST_SRCS),"$(REPO_ROOT)/$(src)")
 
 questa-run: questa-compile
@@ -553,6 +659,16 @@ questa-baremetal-gui: software-images
 		TEST=tb_baremetal \
 		QUESTA_PLUSARGS="+test=$(PROGRAM) +mem=$(SOFTWARE_BUILD_DIR)/$(PROGRAM).mem"
 
+questa-freertos-run: freertos-images
+	@$(MAKE) --no-print-directory questa-run \
+		TEST=tb_freertos_soc \
+		QUESTA_PLUSARGS="+mem=$(SOFTWARE_BUILD_DIR)/freertos_demo.mem +max_cycles=$(FREERTOS_MAX_CYCLES)"
+
+questa-freertos-gui: freertos-images
+	@$(MAKE) --no-print-directory questa-gui \
+		TEST=tb_freertos_soc \
+		QUESTA_PLUSARGS="+mem=$(SOFTWARE_BUILD_DIR)/freertos_demo.mem +max_cycles=$(FREERTOS_MAX_CYCLES)"
+
 questa-isa-gui:
 	@case " $(ISA_PROGRAMS) " in \
 		*" $(ISA_TEST) "*) ;; \
@@ -574,6 +690,15 @@ $(BAREMETAL_SIM): $(tb_baremetal_SRCS) $(CORE_MANIFEST) Makefile | rtl-check-too
 		--Mdir $(@D) \
 		-o Vtb_baremetal \
 		$(tb_baremetal_SRCS)
+
+$(FREERTOS_SIM): $(tb_freertos_soc_SRCS) $(CORE_MANIFEST) Makefile | rtl-check-tools
+	@mkdir -p $(@D)
+	@echo "[BUILD] tb_freertos_soc"
+	+@$(VERILATOR) $(VERILATOR_TEST_FLAGS) \
+		--top-module tb_freertos_soc \
+		--Mdir $(@D) \
+		-o Vtb_freertos_soc \
+		$(tb_freertos_soc_SRCS)
 
 define BAREMETAL_template
 baremetal-$(1): software-images $(BAREMETAL_SIM)
