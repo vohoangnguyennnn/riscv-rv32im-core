@@ -1,60 +1,49 @@
-# Release checklist
+# Release Checklist
 
-Use this checklist when publishing a stable GitHub release. A release means the
-documented RV32IM simulation scope is reproducible; it does not imply official
-RISC-V certification or support for features listed outside the design scope.
+This checklist freezes the RV32IM repository around the FreeRTOS FPGA profile.
+The authoritative evidence record is [Hardware validation](hardware-validation.md).
 
-## 1. Freeze and verify
+## Completed engineering gates
 
-- Confirm `git status --short` contains only intentional source/documentation
-  changes. Do not commit Vivado projects, logs, waveforms, generated binaries,
-  caches, or local IDE metadata.
-- Run `make -j"$(nproc)" test` from a clean checkout.
-- Run `make act4` when the ACT4 network/tool dependencies are available.
-- For an FPGA release, rerun synthesis and implementation against the exact
-  part and speed grade printed on the board. Archive the raw reports outside
-  Git and copy only reviewed summary metrics into the release notes.
-- Program the board with `smoke.mem`; record the LED/DONE result and the tested
-  board revision. Simulation and timing closure alone are not an on-board test.
+- [x] Strict RTL lint, unit, directed integration, assertion, and software tests pass.
+- [x] Pinned `riscv-tests` and Sail-backed ACT4 RV32I/RV32M suites pass.
+- [x] FreeRTOS V11.3.0 runs on the production SoC model in Verilator and Questa.
+- [x] Directed performance and CRC-valid CoreMark runs are recorded.
+- [x] `freertos_demo.mem` is selected by the Vivado top-level generic.
+- [x] The ten-port RTL/XDC board boundary appears in the post-route I/O report.
+- [x] The 75 MHz implementation is fully routed and meets setup, hold, pulse-width, and DRC gates.
+- [x] Firmware, reports, and bitstream are paired with SHA-256 hashes.
+- [x] FreeRTOS boot, UART echo, GPIO, PASS/DONE, and reset behavior have been observed on board.
 
-## 2. Review the public package
+## Required before public `v1.0.0`
 
-- Check `README.md`, `LICENSE`, third-party license notices, source manifests,
-  memory map, FPGA pin constraints, and all commands shown in the docs.
-- Check that no credentials, absolute developer paths, proprietary tool files,
-  or large generated artifacts are staged: `git diff --cached --check` and
-  `git diff --cached --stat`.
-- Review the exact package with `git status --short` and `git diff --cached`.
+- [ ] Review and commit all intended source, third-party pinning, documentation, and CI changes.
+- [ ] Confirm `git status --short` is empty at the release commit.
+- [ ] Run the full release regression and save its console log.
+- [ ] Rebuild the 250 ms board FreeRTOS image from that commit.
+- [ ] Re-run synthesis, implementation, and the FreeRTOS release export from that commit.
+- [ ] Program the exact exported `fpga_top.bit`; capture UART and board evidence.
+- [ ] Record the final commit ID and replacement hashes in `hardware-validation.md`.
+- [ ] Tag `v1.0.0` and attach the Vivado evidence directory or a compressed copy to the GitHub release.
 
-## 3. Publish
-
-Use a focused release commit and an annotated semantic-version tag. Until the
-hardware scope and compatibility policy are frozen, `v0.x.y` is appropriate.
+## Final commands
 
 ```sh
-git add .
-git diff --cached --check
-git diff --cached --stat
-git commit -m "release: prepare v0.1.0"
-git push origin main
-git tag -a v0.1.0 -m "RV32IM core v0.1.0"
-git push origin v0.1.0
+make -j"$(nproc)" test
+make act4
+make benchmark
+make coremark
+make fpga-freertos-images
+git status --short
 ```
 
-Wait for both GitHub Actions workflows to pass before creating the GitHub
-Release from the tag. Release notes should state:
+After `impl_1` completes in the matching Vivado project:
 
-- supported ISA and explicitly excluded features;
-- RTL, bare-metal, `riscv-tests`, and ACT4 result counts;
-- simulator, compiler, ACT4/Sail, Vivado, board, and FPGA-part versions;
-- timing WNS/WHS, DRC status, utilization, and whether an on-board smoke test
-  was actually performed;
-- known limitations and changes since the previous tag.
+```tcl
+set ::release_profile freertos
+source {/absolute/path/to/scripts/vivado/export_release_reports.tcl}
+```
 
-## 4. GitHub repository settings
-
-- Add the topics `riscv`, `rv32im`, `systemverilog`, `cpu`, `fpga`, and
-  `verilator`, plus a concise repository description.
-- Require the RTL and ACT4 checks on `main` after their first successful runs.
-- Disable force pushes and branch deletion on `main`.
-- Enable Issues only if the project will actively accept bug reports.
+The exporter writes `Report_vivado/freertos/<timestamp>/`. Do not tag the
+release if the manifest reports a dirty source state or if the programmed
+bitstream hash differs from that package.

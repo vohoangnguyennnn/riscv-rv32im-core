@@ -9,23 +9,25 @@ The core is a synthesizable, single-hart, single-issue, in-order RV32IM
 processor with a classic IF–ID–EX–MEM–WB pipeline. It implements the complete
 RV32I base integer instruction set and RV32M multiply/divide extension, the six
 Zicsr read-modify-write instructions over a documented CSR set, and a minimal
-machine-mode trap environment. It is intentionally not a complete
-implementation of the RISC-V Privileged Architecture.
+machine-mode environment with precise synchronous traps, machine-timer
+interrupts, `MRET`, and a legal no-op implementation of `WFI`. This is
+intentionally only a subset of the RISC-V Privileged Architecture.
 
 For cycle-level hazard, stall, flush, and redirect behavior, see
 [Pipeline and control](pipeline-control.md). Requirement traceability and the
 current verification evidence are defined in
 [Verification](verification.md), while the runtime, linker, trap ABI, and
-firmware-image flow are defined in [Software](software.md). The board-level
-integration, implementation evidence, and hardware sign-off boundary are
-defined in [FPGA implementation](fpga.md).
+firmware-image flow are defined in [Software](software.md). Board integration
+is defined in [FPGA implementation](fpga.md); frozen implementation and
+benchmark results belong to [Hardware validation](hardware-validation.md),
+[Performance](performance.md), and [CoreMark](coremark.md).
 
 ## 1. Architectural profile
 
 | Property | Implemented configuration |
 |---|---|
 | ISA | RV32I 2.1 + RV32M 2.0 |
-| Additional instructions | Six Zicsr 2.0 operations and `MRET` |
+| Additional instructions | Six Zicsr 2.0 operations, `MRET`, and no-op `WFI` |
 | XLEN | 32 bits |
 | Hart model | One hart, single issue, in order |
 | Pipeline | IF, ID, EX, MEM, WB |
@@ -34,10 +36,10 @@ defined in [FPGA implementation](fpga.md).
 | Register file | 32 × 32-bit GPRs; two asynchronous reads and one synchronous write |
 | Control-transfer resolution | EX stage |
 | Memory architecture | Independent instruction and data request/response ports |
-| Default memory system | Unified 64 KiB true-dual-port TCM |
-| Exception model | Precise synchronous exceptions committed at WB |
-| Execution environment | Minimal M-mode-only bare-metal environment |
-| Interrupts | Not implemented |
+| Default memory system | 64 KiB TCM plus memory-mapped timer/UART/GPIO |
+| Trap model | Precise synchronous exceptions and MTIP committed at WB |
+| Execution environment | M-mode bare-metal and FreeRTOS subset |
+| Interrupts | Single machine-timer source (`MTIE`/`MTIP`, cause 7) |
 | Caches, MMU, PMP | Not implemented |
 
 The baseline can accept and retire one instruction per cycle when there is no
@@ -48,14 +50,15 @@ an application CPI claim.
 <p align="center">
   <img
     src="images/rv32im-core-overview.png"
-    alt="RV32IM core integrated with separate instruction and data paths, a dual-port TCM, reset synchronization, and firmware initialization"
+    alt="RV32IM core integrated into the FPGA SoC: MMCM clocking, reset synchronization, dual-port TCM, memory demultiplexer, machine timer, UART, and GPIO"
     width="1000"
   >
 </p>
 
-<p align="center"><em>Implemented FPGA/SoC boundary: a five-stage RV32IM core,
-separate instruction and data paths, and a firmware-initialized dual-port
-TCM.</em></p>
+<p align="center"><em>FPGA SoC integration view: 75 MHz clocking, reset
+synchronization, the five-stage RV32IM core, dual-port TCM, memory
+demultiplexer, machine timer, UART, and GPIO. The peripheral register
+contracts and memory map are defined in Sections 6–7.</em></p>
 
 ## 2. Design scope and compliance boundary
 
@@ -74,7 +77,7 @@ TCM.</em></p>
 | RV32M multiply | `MUL`, `MULH`, `MULHSU`, `MULHU` |
 | RV32M divide/remainder | `DIV`, `DIVU`, `REM`, `REMU` |
 | CSR access | `CSRRW`, `CSRRS`, `CSRRC`, `CSRRWI`, `CSRRSI`, `CSRRCI` |
-| Trap return | `MRET` within the documented M-mode subset |
+| Machine control | `MRET` and `WFI` within the documented M-mode subset |
 
 <p align="center">
   <img
@@ -112,24 +115,29 @@ completed before a later operation advances past them. `FENCE.I` belongs to
 Zifencei and remains illegal because instruction-fetch synchronization for a
 self-modifying or cached execution environment is outside this scope.
 
+`WFI` is legal only at its exact implemented encoding and retires as a no-op.
+The core does not enter a low-power state or stop instruction issue while
+waiting for an interrupt.
+
 ### 2.2 Explicitly unsupported
 
 The architecture does not implement:
 
 - the C, A, F, D, V, B, or other optional ISA extensions;
 - Zifencei and instruction-cache synchronization;
-- asynchronous interrupts or the `mie`, `mip`, and interrupt-enable fields;
+- machine software/external interrupt sources (`MSIP`/`MEIP`), interrupt
+  prioritization beyond MTIP, or vectored `mtvec`;
 - U-mode, S-mode, delegation, virtual memory, page tables, or `satp`;
 - PMP, debug mode, triggers, or a JTAG debug transport;
 - caches, coherency, branch prediction, speculative retirement, or multiple
   issue;
-- AXI, AHB, APB, DDR, or memory-mapped peripheral integration in the baseline
-  SoC.
+- AXI, AHB, APB, DDR, DMA, PLIC, or cache-coherent integration.
 
 Passing RV32I/RV32M regressions does not imply official RISC-V certification or
-full privileged-architecture compliance. In particular, the implemented
-`MRET` redirects to `mepc` but does not update an `mstatus` privilege/interrupt
-stack because `mstatus` and interrupts are not present.
+full privileged-architecture compliance. The privilege claim is limited to
+M-mode with `MIE/MPIE/MPP`, `MTIE/MTIP`, direct `mtvec`, precise trap entry,
+and `MRET`; U/S modes, delegation, and the remaining interrupt sources are
+outside scope.
 
 ## 3. Programmer-visible state
 
@@ -148,12 +156,15 @@ independently of FPGA memory inference semantics.
 
 | CSR | Address | Access | Implemented behavior |
 |---|---:|---:|---|
+| `mstatus` | `0x300` | RW/WARL | `MIE`/`MPIE` writable; `MPP` hardwired to M; all other fields zero |
 | `misa` | `0x301` | RO | `MXL=1`; I and M bits set (`0x4000_1100`) |
+| `mie` | `0x304` | RW/WARL | `MTIE` writable; `MSIE`/`MEIE` and other fields read zero |
 | `mtvec` | `0x305` | RW | Direct mode only; low two bits are forced to zero |
 | `mscratch` | `0x340` | RW | General trap-handler scratch register |
 | `mepc` | `0x341` | RW | Faulting PC; low two bits are forced to zero |
-| `mcause` | `0x342` | RW/WLRL subset | Implemented synchronous cause in bits `[4:0]` |
+| `mcause` | `0x342` | RW/WLRL subset | Bit 31 distinguishes interrupts; implemented code in bits `[4:0]` |
 | `mtval` | `0x343` | RW | Fault address, target, instruction, or zero as listed below |
+| `mip` | `0x344` | RW-addressed | Live read-only `MTIP`; writes are legal and have no effect |
 | `mcycle` | `0xB00` | RW | Low half of a 64-bit cycle counter |
 | `mcycleh` | `0xB80` | RW | High half of the cycle counter |
 | `minstret` | `0xB02` | RW | Low half of a 64-bit retirement counter |
@@ -162,6 +173,7 @@ independently of FPGA memory inference semantics.
 | `marchid` | `0xF12` | RO | Reads zero |
 | `mimpid` | `0xF13` | RO | Reads zero |
 | `mhartid` | `0xF14` | RO | Reads zero for the single hart |
+| `mconfigptr` | `0xF15` | RO | Reads zero |
 
 `mcycle` normally increments once per non-reset clock, and `minstret` normally
 increments once for each non-trapping instruction retired at WB. An explicit
@@ -174,24 +186,26 @@ write when `rs1=x0` or `zimm=0`, allowing read-only CSR access without an
 illegal write. Access to an unimplemented CSR, or an actual write to a read-only
 CSR, raises an illegal-instruction exception.
 
+`mstatus` resets with `MPP=M`, `MIE=0`, and `MPIE=0`. Precise trap entry saves
+the previous global enable with `MPIE←MIE` and clears `MIE`. A committed `MRET`
+restores `MIE←MPIE`, sets `MPIE←1`, keeps the single legal `MPP=M` value, and
+redirects to `mepc`. `mie.MTIE` and the live `mip.MTIP` level jointly qualify
+the only asynchronous source.
+
 ## 4. Microarchitecture
 
 ### 4.1 Top-level organization
 
-```text
-                    branch/JAL/JALR/MRET redirect
-                                  |
-                                  v
- imem <-> IF -> IF/ID -> ID -> ID/EX -> EX -> EX/MEM -> MEM -> MEM/WB -> WB
-          |              |           |               |                 |
-          |              |           |               +---- dmem       +-- GPR commit
-          |              |           +-- ALU / branch / MUL / DIV      +-- CSR/trap commit
-          |              +-- decode / immediate / register file        +-- retirement trace
-          +-- PC / request tracking / stale-response discard
+<p align="center">
+  <a href="images/pipeline-diagram.png">
+    <img src="images/pipeline-diagram.png" alt="Five-stage IF-ID-EX-MEM-WB stage diagram with interstage hazard markers" width="1050">
+  </a>
+</p>
 
-                         centralized pipeline control
-          load-use + CSR dependency + EX wait + MEM wait + exception + redirect
-```
+<p align="center"><em>High-level IF–ID–EX–MEM–WB stage sequence with
+interstage hazard/bubble markers. Forwarding, hold, flush, and redirect paths
+are not depicted here; they are specified in §§4.3–4.4 below and in
+[Pipeline and control](pipeline-control.md).</em></p>
 
 The four interstage registers are packed structures defined in
 `rv32_pkg.sv` and owned by `rv32_core.sv`. Each packet carries a `valid` bit;
@@ -219,6 +233,15 @@ scoreboard, speculative state checkpoint, or out-of-order completion path.
 Multicycle EX and delayed MEM operations hold the owning pipeline packet until
 their response is accepted.
 
+<p align="center">
+  <a href="images/schematic_rv32core.png">
+    <img src="images/schematic_rv32core.png" alt="Synthesized RV32IM core hierarchy" width="1000">
+  </a>
+</p>
+
+<p align="center"><em>Vivado synthesized hierarchy of the implemented core;
+the architectural diagram remains the primary readability view.</em></p>
+
 ### 4.3 Data hazards and forwarding
 
 Two independent EX operand muxes select the register-file snapshot, the newest
@@ -233,10 +256,12 @@ pipeline control extend the hold until the response arrives. Forwarded operands
 are shared by ALU, branch/JALR comparison, store address/data, CSR, and MDU
 consumers.
 
-CSR accesses use a conservative serialization rule: a CSR instruction in ID
-waits behind any older uncommitted CSR writer in ID/EX or EX/MEM. `MRET` waits
-only for an older write to `mepc`; reads of `minstret` drain older retirement
-events so the observed count remains program ordered.
+CSR ordering is address aware. A CSR instruction in ID waits only behind an
+older ID/EX or EX/MEM writer to the same architectural CSR state. The low/high
+halves of `mcycle` and `minstret` alias their respective 64-bit counters;
+`minstret[h]` also waits for any older non-trapping retirement still in flight.
+`MRET` waits only for an older write to `mepc`. A writer already in MEM/WB
+commits on the edge that advances the reader to EX, so it adds no stall.
 
 Detailed priority and timing examples are specified in
 [Pipeline and control](pipeline-control.md).
@@ -295,7 +320,9 @@ cases:
 | `INT_MIN / -1` | `0x8000_0000` | `0x0000_0000` |
 
 These cases complete locally without entering the 32-iteration loop. Neither
-case generates an exception.
+case generates an exception. The divider also bypasses the iterative loop when
+the dividend magnitude is smaller than the divisor magnitude, returning zero
+for division or the original dividend for remainder.
 
 ## 6. Memory architecture
 
@@ -336,13 +363,13 @@ the original effective byte address remains attached to the instruction for
 formatting, tracing, and fault reporting.
 
 Misaligned halfword or word accesses trap locally and do not issue a memory
-request. An aligned request whose word address lies outside the configured TCM
-range returns `rsp_err` and becomes a load/store access fault. A request that
-was already presented before a kill cannot be withdrawn: the LSU completes the
-handshake and drains the response without exposing a stale result to the
+request. An aligned TCM-bound request outside the configured memory range, or
+an invalid access reported by a selected MMIO slave, returns `rsp_err` and
+becomes a load/store access fault. A request accepted before a kill cannot be
+withdrawn: the LSU drains its response without exposing a stale result to the
 pipeline.
 
-### 6.3 Dual-port TCM and SoC boundary
+### 6.3 Dual-port TCM and SoC fabric
 
 The default `rv32_tcm` is a unified, true-dual-port memory:
 
@@ -356,8 +383,43 @@ The default `rv32_tcm` is a unified, true-dual-port memory:
 - an optional word-oriented `$readmemh` image initializes simulation or FPGA
   block RAM.
 
-`soc_tcm_top` connects the two core ports to the TCM and exposes retirement and
-test-status signals. Its principal parameters are:
+Instruction traffic connects directly to TCM port A. Data traffic enters
+`rv32_mem_demux`, which decodes TCM, timer, UART, and GPIO. It latches the
+selected target only on a request handshake and keeps that target as response
+owner until completion. One outstanding slot may retire an old response and
+accept a new request in the same cycle, including a back-to-back target
+change. Masked-region overlap is rejected during elaboration.
+
+The default programmer-visible map is:
+
+<p align="center">
+  <a href="images/memory-map.png">
+    <img src="images/memory-map.png" alt="RV32IM SoC 32-bit memory map showing TCM, machine timer, UART, GPIO, and unmapped regions" width="1000">
+  </a>
+</p>
+
+<p align="center"><em>Default byte-addressed SoC map. Region heights are not
+proportional; only the explicitly listed MMIO registers are implemented inside
+each 64 KiB peripheral aperture.</em></p>
+
+| Address | Device / register |
+|---:|---|
+| `0x0000_0000–0x0000_FFFF` | 64 KiB TCM |
+| `0x0000_FFFC` | Retirement-qualified completion mailbox |
+| `0x0200_4000/0x0200_4004` | `mtimecmp` low/high |
+| `0x0200_BFF8/0x0200_BFFC` | `mtime` low/high |
+| `0x1000_0000/04/08/0C` | UART TX/RX/status/baud-divisor |
+| `0x1001_0000/04/08` | GPIO input/output/output-enable |
+| `0x1001_000C/10/14` | GPIO atomic set/clear/toggle |
+
+The timer increments once per active clock and drives the core's live MTIP
+input when `mtime >= mtimecmp`. Its 64-bit registers are intentionally exposed
+as aligned 32-bit halves. UART implements parameterized 8N1 TX/RX with one
+buffered RX byte and sticky overrun/frame-error status. GPIO synchronizes
+external inputs and supports byte-enabled output operations.
+
+`soc_tcm_top` exposes UART/GPIO pins, retirement, performance counters, and
+test status. Its principal parameters include:
 
 | Parameter | Default | Purpose |
 |---|---:|---|
@@ -366,6 +428,12 @@ test-status signals. Its principal parameters are:
 | `TCM_BYTES` | 64 KiB | Unified TCM capacity |
 | `TCM_BASE_ADDR` | `0x0000_0000` | TCM base byte address |
 | `TCM_INIT_FILE` | Empty | Optional word-oriented initialization image |
+| `TIMER_BASE_ADDR` | `0x0200_0000` | 64 KiB timer aperture |
+| `UART_BASE_ADDR` | `0x1000_0000` | 64 KiB UART aperture |
+| `UART_CLK_FREQ_HZ` | 50 MHz | SoC-level UART input-clock default; the FPGA wrapper overrides it with 75 MHz |
+| `UART_BAUD_RATE` | 115,200 | UART line rate |
+| `GPIO_BASE_ADDR` | `0x1001_0000` | 64 KiB GPIO aperture |
+| `GPIO_WIDTH` | 32 | Implemented GPIO pin count |
 | `TEST_STATUS_ADDR` | Last TCM word | Completion mailbox address |
 | `TEST_PASS_VALUE` | `1` | Passing mailbox value |
 
@@ -377,23 +445,45 @@ architectural state.
 ### 6.4 Reset contract
 
 `rv32_core` and `soc_tcm_top` consume a synchronous, active-high `rst_i`. Core
-state, pipeline-valid bits, outstanding-transaction state, CSRs, counters, and
-the completion mailbox change reset state only on a rising clock edge. The TCM
-array itself is deliberately not reset; firmware is supplied through its
-initialization image or by the simulation harness.
+architectural state, pipeline-valid bits, CSRs, counters, and the completion
+mailbox enter reset state only on a rising clock edge. The TCM array itself is
+deliberately not reset; firmware is supplied through its initialization image
+or by the simulation harness.
 
-At the FPGA boundary, `reset_sync` is the only block exposed to the external
-active-low asynchronous reset event on `reset_ni`. Its synchronization pipeline
-captures that event, while the functional reset delivered to the SoC is a
-separate register without asynchronous control. Consequently, both assertion
-and deassertion of the reset observed by the CPU occur only on rising edges of
-the 50 MHz board clock. The default wrapper uses two synchronization stages.
+Reset does not cancel an externally accepted transaction. If a pre-reset IF or
+LSU request still owns a response, the corresponding core master retains only
+the protocol bookkeeping needed to discard that response and suppresses new
+issue until the drain completes. A replacement memory system must therefore
+preserve exactly one response for every accepted request across core reset.
+
+At the FPGA boundary, `reset_sync` converts the combined clock-boundary reset,
+user SoC reset, and clock-lock indication into the functional SoC reset. Only
+its synchronization pipeline captures the active-low event asynchronously;
+the functional reset delivered to the SoC is a separate register without
+asynchronous control. Consequently, both assertion and deassertion observed by
+the CPU occur only on rising edges of the generated 75 MHz SoC clock. The
+default wrapper uses two synchronization stages.
 
 Any alternative integration must preserve the synchronous `rst_i` contract and
 must not introduce asynchronous reset controls into the TCM address, data, or
 write-enable paths.
 
-## 7. Synchronous exceptions and precise traps
+## 7. Precise traps and machine-timer interrupt
+
+<p align="center">
+  <img
+    src="images/mret.png"
+    alt="Conceptual trap and MRET flow: synchronous exception or eligible MTIP interrupt into common trap entry, then MRET recovery back to normal execution"
+    width="900"
+  >
+</p>
+
+<p align="center"><em>Conceptual trap/MRET control flow: a synchronous
+exception or an eligible MTIP interrupt enters common trap entry
+(`mepc`/`mcause`/`mtval` capture, `MPIE←MIE`, `MIE←0`, `MPP=M`), and a
+committed `MRET` restores `MIE←MPIE` and returns to `mepc`. This is a
+conceptual overview; cycle-level ordering and priority are defined below and
+in [Pipeline and control §6](pipeline-control.md#6-precise-traps-and-mtip-injection).</em></p>
 
 ### 7.1 Implemented exception causes
 
@@ -415,37 +505,46 @@ exception is detected, younger packets are flushed and the front end stops
 while the faulting packet drains to WB. Older instructions retain normal
 program-order completion.
 
+The only asynchronous source is machine timer interrupt code 7. It becomes
+eligible when the live timer level drives `mip.MTIP=1`, `mie.MTIE=1`, and
+`mstatus.MIE=1`. Eligibility is sampled at the ID instruction boundary. The
+core replaces that next architectural instruction with a synthetic interrupt
+packet whose PC becomes `mepc`; an exception already attached to the boundary
+instruction wins instead.
+
+An older in-flight writer to `mstatus` or `mie`, or an older `MRET`, stalls
+interrupt injection until WB. At that exact commit boundary, the CSR file's
+prioritized next state is used, so enabling can take a pending interrupt
+immediately and disabling cannot leak one into the shadow window. Ambiguous
+states default to no injection.
+
 At WB, a trapping packet:
 
 1. writes the aligned faulting PC to `mepc`;
-2. writes the synchronous cause to `mcause`;
+2. writes the interrupt flag and implemented cause to `mcause`;
 3. writes the documented value to `mtval`;
 4. suppresses GPR, CSR, and memory side-effect metadata;
 5. does not increment `minstret`;
 6. redirects fetch to the aligned direct-mode `mtvec` value.
+
+Trap entry also performs `mstatus.MPIE←mstatus.MIE`, clears `mstatus.MIE`, and
+keeps the only implemented `MPP=M` value. Interrupt `mtval` is zero. A timer
+trap preserves the interrupted boundary PC, whereas software deciding to
+resume after a synchronous fixed-width ECALL normally advances `mepc` by four.
 
 An older WB trap or MEM exception has priority over younger EX work and control
 redirects. Stores are allowed to reach the data port only after older hazards
 and exceptions can no longer invalidate them. These ordering rules ensure that
 wrong-path and faulting instructions do not create architectural state.
 
-`MRET` redirects to the aligned `mepc` value and retires as a normal control
-instruction. Because this is a same-privilege, interrupt-free environment, no
-privilege-mode or interrupt-enable stack is implemented.
-
-<p align="center">
-  <img
-    src="images/mret.png"
-    alt="Minimal machine-mode synchronous trap entry and MRET return flow"
-    width="1000"
-  >
-</p>
-
-<p align="center"><em>Minimal synchronous machine-mode trap flow. Normal
-firmware and the trap handler execute at the same privilege level; interrupts,
-`mstatus` transitions, and U-mode are outside the implemented scope.</em></p>
+`MRET` redirects to aligned `mepc` in EX and changes CSR state only when it
+commits at WB. Commit restores `MIE←MPIE`, sets `MPIE←1`, and retains `MPP=M`.
+This split keeps wrong-path or faulting `MRET` instructions from changing the
+interrupt stack.
 
 ## 8. Architectural retirement interface
+
+### 8.1 Retirement trace
 
 `rv32_core` exports one stable observation point at MEM/WB. `trace_valid_o`
 marks either a non-trapping retirement or a trap event; `trace_trap_o`
@@ -453,18 +552,37 @@ distinguishes the latter.
 
 | Trace field | Meaning |
 |---|---|
-| `trace_pc_o`, `trace_insn_o` | Committed or trapping instruction identity |
+| `trace_pc_o`, `trace_insn_o` | Retiring/trapping packet identity; synthetic MTIP uses the interrupted boundary PC and a zero instruction payload |
 | `trace_rd_we_o` | Architectural GPR write enable |
 | `trace_rd_addr_o`, `trace_rd_data_o` | Destination register and committed value |
 | `trace_mem_addr_o` | Effective address for a completed load or store; `trace_mem_wstrb_o` distinguishes stores |
 | `trace_mem_wstrb_o`, `trace_mem_wdata_o` | Retired store byte lanes and data |
-| `trace_trap_o`, `trace_cause_o` | Synchronous trap event and cause |
+| `trace_trap_o`, `trace_cause_o` | Synchronous or timer-interrupt trap event and cause |
+| `trace_is_interrupt_o` | Distinguishes the MTIP trap from a synchronous exception |
 | `trace_control_o` | Retired control-transfer instruction |
 | `trace_taken_o`, `trace_target_o` | Taken state and resolved target |
 
 The trace is not a debug-mode implementation and does not alter architectural
 execution. It decouples verification, software completion, and future
 differential checking from internal pipeline-register names.
+
+### 8.2 Diagnostic performance counters
+
+The core also exports 64-bit, reset-to-zero diagnostic counters. They are
+read-only integration outputs, are not additional RISC-V CSRs, and do not feed
+back into pipeline control.
+
+| Output | Counted event |
+|---|---|
+| `perf_cycle_o`, `perf_instret_o` | Active cycles and non-trapping WB retirements |
+| `perf_load_use_stall_o`, `perf_csr_stall_o` | Effective load-use and CSR/interrupt-state stall cycles |
+| `perf_mdu_stall_o`, `perf_mem_stall_o` | Effective MDU and data-memory stall cycles |
+| `perf_redirect_o`, `perf_squash_o` | Accepted EX redirects and valid younger packets discarded by them |
+
+The stall categories follow controller age priority and are mutually
+exclusive. Redirect and squash values are event/packet counts rather than
+stall cycles. Their measurement contract and frozen values are defined in
+[Performance](performance.md) and [CoreMark](coremark.md).
 
 ## 9. Module ownership
 
@@ -478,8 +596,10 @@ differential checking from internal pipeline-register names.
 | `forwarding_unit`, `hazard_unit`, `pipeline_ctrl` | Dependency handling and global pipeline ordering |
 | `mul_unit`, `div_unit` | Blocking RV32M execution |
 | `lsu` | Load/store formatting, protocol handling, and data faults |
-| `csr_file` | Implemented CSR state, counters, and trap entry |
-| `rv32_tcm`, `soc_tcm_top` | Unified TCM and minimal SoC integration |
+| `csr_file` | CSR WARL state, counters, interrupt qualification, trap/MRET transitions |
+| `rv32_tcm`, `rv32_mtimer` | Unified TCM and memory-mapped 64-bit machine timer |
+| `rv32_uart`, `rv32_gpio` | Project-defined serial and general-purpose I/O |
+| `rv32_mem_demux`, `soc_tcm_top` | Response-safe MMIO fabric and complete SoC integration |
 | `reset_sync`, `fpga_top` | Board reset boundary and FPGA-visible status |
 
 The synthesizable core source order is maintained in `files/core.f`; the SoC
@@ -495,17 +615,21 @@ they are not workload benchmark results.
 |---|---|
 | Independent instruction stream | Up to one issue and one retirement per cycle |
 | TCM request | Registered response one cycle after acceptance |
+| Peripheral request | Registered response; UART TX may backpressure while busy |
 | Immediate load consumer | One interlock bubble with one-cycle TCM |
 | Not-taken conditional branch | No redirect bubble |
 | Taken branch, `JAL`, `JALR`, or `MRET` | Two younger packets flushed |
 | Multiply | Registered two-stage request/response operation |
 | Normal divide/remainder | 32 restoring iterations |
-| Divide-by-zero or signed overflow | Local result without iterative run |
+| Divide-by-zero, signed overflow, or smaller dividend magnitude | Local result without iterative run |
 | Outstanding transactions | At most one per core memory port |
+| Timer interrupt | Sampled between instructions and committed as a precise trap packet |
 
 Application CPI depends on instruction mix, dependencies, control flow, and
 memory latency. Software can measure a defined interval using the 64-bit
-`mcycle` and `minstret` counters.
+`mcycle` and `minstret` counters. Current frozen measurements are reported in
+[Performance](performance.md), [CoreMark](coremark.md), and
+[Hardware validation](hardware-validation.md), not duplicated here.
 
 ## 11. Integration and extension boundaries
 
@@ -515,8 +639,8 @@ those features today:
 - a cache or bus bridge may replace the TCM behind the two blocking memory
   interfaces;
 - the retirement trace can drive a differential checker or debug bridge;
-- asynchronous interrupts require a complete addition of `mstatus`, `mie`,
-  `mip`, prioritization, and xRET state transitions;
+- software/external interrupts require new pending sources, prioritization,
+  additional `mie/mip` bits, and a controller such as a PLIC;
 - caches require Zifencei behavior and a defined instruction/data coherence
   policy;
 - higher privilege modes require the corresponding architectural state,
@@ -524,7 +648,7 @@ those features today:
   additions.
 
 Changes at these seams must preserve in-order commit, precise exceptions,
-request/response accounting, and stale-transaction cancellation.
+request/response accounting, and stale-response draining.
 
 ## 12. Normative references
 

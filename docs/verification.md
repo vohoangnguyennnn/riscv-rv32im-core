@@ -1,137 +1,115 @@
 # RV32IM Verification Strategy
 
-This document defines the verification strategy, requirement traceability, and
-current evidence for the RV32IM five-stage core. It describes checks that exist
-in the repository today; planned techniques are identified explicitly and are
-not included in the passing baseline.
-
-The programmer-visible contract is defined in
-[Architecture](architecture.md), cycle-level ordering is defined in
+This document defines what is verified, which evidence supports each design
+claim, and how the regression is reproduced for the five-stage RV32IM core and
+its memory-mapped SoC. The design contract is owned by
+[Architecture](architecture.md), cycle-level ordering by
 [Pipeline and control](pipeline-control.md), and the software execution
-environment is defined in [Software](software.md). The project-level result
-summary and quick-start commands remain in the
-[README](../README.md#verification).
+contract by [Software](software.md).
 
-## 1. Verification objectives
+This file owns verification structure and acceptance policy. The dated,
+frozen PASS snapshot—including cycle counts, FPGA timing, utilization, board
+result, and artifact hashes—is recorded once in
+[Hardware validation](hardware-validation.md).
 
-The verification plan is organized around four objectives:
+## 1. Scope and objectives
 
-1. **Architectural correctness:** every implemented RV32I, RV32M, Zicsr, and
-   machine-mode-subset operation produces the documented programmer-visible
-   result.
-2. **Precise in-order execution:** dependencies, waits, redirects, and traps
-   preserve program order and suppress faulting or wrong-path side effects.
-3. **Interface correctness:** instruction/data requests remain stable under
-   backpressure, each accepted request receives one ordered response, and
-   killed responses are drained without re-entering the pipeline.
-4. **Reproducibility:** tests are self-checking, have deterministic termination,
-   use pinned external test sources where practical, and retain actionable
-   failure artifacts.
+The checked-in verification environment targets five properties:
 
-The verification target is the checked-in implementation, not an abstract
-fully privileged RISC-V platform. The core intentionally excludes interrupts,
-U/S modes, PMP, caches, an MMU, debug mode, compressed instructions, and all
-other ISA extensions listed outside the architectural scope.
+1. **Architectural correctness:** implemented RV32I, RV32M, Zicsr, CSR, trap,
+   MTIP, and `MRET` behavior produces the documented visible state.
+2. **Precise in-order execution:** dependencies, waits, redirects, exceptions,
+   and interrupts preserve age order and suppress wrong-path side effects.
+3. **Memory protocol correctness:** a backpressured or accepted request stays
+   stable, has bounded ownership, and cannot be confused with a stale response.
+4. **SoC integration:** TCM, timer, UART, GPIO, and address demultiplexing obey
+   their register, transaction, and response-routing contracts.
+5. **Executable-system behavior:** bare-metal and FreeRTOS images boot through
+   the production startup/linker flow and complete through architectural
+   evidence.
 
-## 2. Reference baseline and claim boundary
+The claim is bounded to the documented implementation. It excludes U/S modes,
+PMP, virtual memory, debug mode, caches, compressed instructions, external and
+software interrupt controllers, official RISC-V certification, and production
+RTOS or silicon qualification.
 
-| Requirement source | Applied scope |
+## 2. Verification architecture
+
+<p align="center">
+  <a href="images/verification-flow.png">
+    <img src="images/verification-flow.png" alt="RV32IM verification layers and acceptance oracles" width="1050">
+  </a>
+</p>
+
+<p align="center"><em>Verification layers converge on architectural
+retirement, signatures, and self-checking diagnostics; waveforms remain a
+debug aid rather than the PASS oracle.</em></p>
+
+| Layer | DUT boundary and primary oracle | Inventory / command |
+|---|---|---|
+| Strict lint | Synthesizable core, SoC blocks, and reset wrapper | `make lint` |
+| Unit RTL | Leaf datapath, stages, controller, memory endpoints, and peripherals | 21 self-checking benches |
+| Directed integration | Complete core, precise traps/MTIP, waits, forwarding, control recovery, and SoC | 7 self-checking benches |
+| Bound assertions | Memory protocol, retirement, and interrupt invariants in full-core simulations | `make assertions` focuses 3 stress benches |
+| FreeRTOS SoC | Production SoC hierarchy, scheduler, timer, UART, GPIO, and mailbox | 1 end-to-end bench |
+| Bare-metal software | Production core/TCM plus startup, runtime, trap entry, and linker script | 2 programs |
+| Pinned `riscv-tests` | Full pipeline with retirement-qualified completion | 40 RV32I + 8 RV32M |
+| ACT4 4.0.0 + Sail | Generated self-checking I/M ELFs against independent signatures | 39 RV32I + 8 RV32M |
+| Questa cross-check | Curated RTL portfolio and FreeRTOS execution | Local licensed gate |
+
+`make test` is the public open-source gate: strict lint, 29 RTL
+simulations (21 unit, 7 directed integration, and one FreeRTOS SoC), two
+bare-metal programs, and 48 pinned ISA programs. ACT4 is separate because its
+generator, Sail model, solver, and toolchain bootstrap are heavier external
+dependencies.
+
+<p align="center">
+  <a href="images/test-log.png">
+    <img src="images/test-log.png" alt="Public Verilator RTL and ISA regression PASS summary" width="950">
+  </a>
+</p>
+
+<p align="center"><em>Frozen public-gate terminal summary. The authoritative
+dated disposition and tool versions remain in Hardware validation.</em></p>
+
+The accepted frozen result for these layers is
+[Hardware validation §1](hardware-validation.md#1-validation-disposition).
+FPGA implementation and physical-board evidence are separate evidence classes;
+simulation PASS alone does not establish a hardware claim.
+
+## 3. Checker and assertion policy
+
+### 3.1 Acceptance oracles
+
+- Every bench is self-checking and terminates on a violated expectation or
+  timeout; a waveform is debug evidence, not a PASS oracle.
+- Unit tests compare directed vectors, handshakes, state transitions, and
+  exception metadata at the smallest useful boundary.
+- Integration tests prefer retirement events, architectural state, memory
+  signatures, and externally visible SoC behavior. Internal signals are used
+  only for microarchitectural invariants.
+- Software PASS requires a retired, aligned, full-word store to `tohost`;
+  speculative, squashed, or faulting stores cannot complete a test.
+- Simulation harnesses clear TCM before image load and enforce cycle or
+  retirement limits. The bare-metal harness can emit retirement CSV for
+  failure diagnosis.
+- Verilator and Questa results remain separate so simulator-specific
+  elaboration or scheduling assumptions are visible.
+
+### 3.2 Bound assertions
+
+The assertion modules live under `tb/assertions` and are compiled only
+for verification targets.
+
+| Checker | Enforced invariants |
 |---|---|
-| RISC-V RV32I, version 2.1 | Integer state, instruction results, control flow, loads/stores, `FENCE`, `ECALL`, and `EBREAK` |
-| RISC-V M extension, version 2.0 | Four multiply and four divide/remainder operations, including divide-by-zero and signed-overflow results |
-| RISC-V Zicsr, version 2.0 | Six CSR read-modify-write instruction semantics over the implemented CSR address set |
-| RISC-V Machine-Level ISA, version 1.13 | Only the documented synchronous trap/CSR subset and `MRET` behavior |
-| Architecture and pipeline specifications | Implemented scope, pipeline structure, interfaces, action priority, and completion behavior |
-| Checked-in RTL | Implementation-specific latency, handshake, action priority, and recovery behavior |
+| Memory protocol | Request stability under backpressure, response provenance, at most one outstanding transaction, word-aligned physical requests, and legal read/write strobes |
+| Retirement | No retirement from a held slot, side-effect-free traps, legal GPR/store events, consistent control metadata, and aligned retirement PC |
+| Timer interrupt | Effective eligibility, CSR-state ambiguity and trap-drain exclusion, immediate post-commit enable behavior, candidate provenance, and construction of a precise side-effect-free interrupt packet |
 
-The official ISA documents define architectural results; they do not prescribe
-this core's five-stage timing. Conversely, passing the regressions below does
-not imply official RISC-V certification, full Zicsr compliance, or full
-Privileged Architecture compliance. ACT4 is an independent architectural-test
-layer for the I/M claim and does not replace design-specific verification of
-pipeline control, CSRs, or traps.
-
-## 3. Verification architecture
-
-The environment is deliberately lightweight and audit-friendly. It uses
-self-checking SystemVerilog testbenches, compiler-generated bare-metal images,
-architectural signatures, and a retirement-event interface rather than a UVM
-class hierarchy.
-
-```text
-           direct expected values and protocol invariants
-                              |
-        +---------------------+---------------------+
-        |                     |                     |
-   leaf/stage unit       full-core directed    software/ISA ELF
-      testbenches          integration             images
-        |                     |                     |
-        +---------- SystemVerilog RTL -------------+
-                              |
-                 architectural retirement trace
-                              |
-             signatures / tohost / CSV diagnostics
-```
-
-### 3.1 Layered regression
-
-| Layer | DUT boundary | Primary oracle | Current baseline |
-|---|---|---|---:|
-| Static RTL | Core, TCM, SoC, reset, FPGA top | Strict Verilator lint with documented structural waivers | PASS |
-| Unit simulation | Combinational units, stateful units, stages, and controller | Direct expected values plus handshake/state invariants | 17/17 PASS |
-| Integration simulation | Core pipeline, CSR/trap path, SoC/TCM, and FPGA wrapper | Architectural signatures, retirement events, and selected internal invariants | 7/7 PASS |
-| Bare-metal software | Full core + 64 KiB TCM + runtime | Retirement-qualified `tohost` status | 2/2 PASS |
-| Pinned `riscv-tests` | Full core + 64 KiB TCM | Upstream self-checking signatures and `tohost` | 40 RV32I + 8 RV32M PASS |
-| ACT4 + Sail | Full core + simulation-only 1 MiB TCM | Sail-derived expected signatures in self-checking ELFs | 39 RV32I + 8 RV32M PASS |
-| Questa portfolio | Eleven selected hardware testbenches | Same self-checkers plus curated waveform inspection | Local debug/evidence flow |
-| FPGA smoke | FPGA top + initialized TCM | Board-visible heartbeat/PASS/FAIL/DONE | Observed locally; public evidence bundle pending |
-
-`make test` is the public RTL regression entry point. It runs lint, all 24 RTL
-simulations, both bare-metal programs, and all 48 pinned `riscv-tests`
-programs. ACT4 is separate because it requires additional pinned generators,
-the Sail model, and network/tool bootstrap steps.
-
-### 3.2 Design-gate closure
-
-The original staged plan remains useful as a release audit trail:
-
-| Design gate | Closure evidence | Status |
-|---|---|---:|
-| Gate 0 — lint/build | Verilator lint for five synthesis boundaries; shared ordered source manifests | PASS |
-| Gate 1 — combinational units | Immediate, decoder, ALU, and branch unit tests | PASS |
-| Gate 2 — stateful leaf units | Regfile, IF/ID/EX, LSU, MDU, CSR, TCM, reset, and controller tests | PASS |
-| Gate 3 — hazard-free pipeline | Full-core directed execution and bare-metal smoke path | PASS |
-| Gate 4 — forwarding/hazards | Three dedicated pipeline integration tests plus unit invariants | PASS |
-| Gate 5 — machine-mode subset | CSR core integration, precise-control integration, and trap software | PASS |
-| Gate 6 — `riscv-tests` | 40 RV32I and 8 RV32M programs | PASS |
-| Gate 6A — ACT4 | 39 RV32I and 8 RV32M Sail-backed tests | PASS |
-| Gate 7 — differential/random | Retirement differential and generated random programs | OPEN |
-| Gate 8 — FPGA | Routed 50 MHz image and local on-board smoke | Local closure; public evidence pending |
-
-Gate 7 is intentionally not folded into the baseline result. Gate 8 concerns
-implementation and hardware evidence rather than replacing functional RTL
-verification.
-
-### 3.3 Checker and oracle policy
-
-- Unit tests calculate expected results independently of the DUT datapath and
-  terminate with `$fatal` on the first mismatch.
-- Integration tests prefer architectural memory signatures and retirement
-  events. Internal signals are checked only where an architectural signature
-  cannot prove an exact microarchitectural invariant, such as forwarding
-  priority, bubble count, payload stability, or flush mask.
-- Software and ISA tests complete only through a retired aligned full-word
-  store to the configured `tohost` address. A speculative, faulting, or
-  squashed store cannot falsely report PASS.
-- Every software image starts from a cleared TCM, is loaded independently, and
-  has both cycle and retirement-event timeouts.
-- The bare-metal harness retains the most recent 256 retirement events and can
-  emit a complete CSV trace for failure triage.
-
-The current suite uses deterministic procedural checkers. Verilator is invoked
-with assertion support, but this baseline does not claim a concurrent-SVA,
-formal-proof, UVM, constrained-random, code-coverage, or functional-coverage
-closure.
+The protocol checker retains accepted-transaction accounting across core reset
+so a late external response can be drained. Assertions complement directed
+tests; they do not constitute formal proof or functional/code coverage closure.
 
 ## 4. Requirement-to-evidence traceability
 
@@ -139,271 +117,194 @@ closure.
 
 | Requirement | Principal evidence |
 |---|---|
-| RV32I decode and integer results | `tb_decoder`, `tb_imm_gen`, `tb_alu`, `tb_branch_unit`; 40 pinned RV32I programs; 39 ACT4 RV32I tests |
-| Complete RV32M results | `tb_mul_unit`, `tb_div_unit`, `tb_ex_stage`; all 8 pinned RV32M programs; all 8 ACT4 RV32M tests |
-| `x0`, GPR addresses, and WB semantics | `tb_regfile`, `tb_id_stage`, `tb_rv32_core`, retirement trace checks |
-| JAL/JALR/branch results and targets | `tb_branch_unit`, `tb_ex_stage`, `tb_pipeline_control`, RV32I control-flow programs |
-| Little-endian byte/half/word accesses | `tb_lsu`, `tb_rv32_tcm`, `tb_soc_tcm_top`, RV32I memory programs |
-| Misalignment and access-fault policy | `tb_lsu`, `tb_if_stage`, `tb_pipeline_control` |
-| Six Zicsr operations and CSR legality | `tb_decoder`, `tb_csr`, `tb_csr_core`, `tb_rv32_core` |
-| `mcycle`/`minstret` and explicit writes | `tb_csr`, `tb_csr_core`, full-core retirement accounting |
-| Precise synchronous traps and `MRET` | `tb_pipeline_ctrl`, `tb_pipeline_control`, `tb_csr_core`, bare-metal `trap` |
-| Freestanding RV32IM/Zicsr execution | Bare-metal `smoke` and `trap` through the production startup, linker, TCM, and core |
+| RV32I decode and visible results | Leaf tests, `tb_rv32_core`, 40 pinned RV32I programs, 39 ACT4 RV32I tests |
+| Complete RV32M operations and corner cases | `tb_mul_unit`, `tb_div_unit`, `tb_ex_stage`, 8 pinned and 8 ACT4 RV32M tests |
+| GPR and retirement semantics | `tb_regfile`, `tb_id_stage`, retirement assertions, software traces |
+| Branch, JAL, and JALR targets/recovery | `tb_branch_unit`, `tb_ex_stage`, `tb_core_control_flow`, ISA control-flow tests |
+| Little-endian byte/half/word memory | `tb_lsu`, `tb_rv32_tcm`, `tb_soc_tcm_top`, ISA memory tests |
+| CSR operations, legality, and WARL masks | `tb_decoder`, `tb_csr`, `tb_csr_core` |
+| `mcycle`/`minstret` and retirement qualification | `tb_csr`, `tb_csr_core`, bare-metal traces |
+| Precise synchronous traps and `MRET` | `tb_pipeline_ctrl`, `tb_core_control_flow`, `tb_csr_core`, bare-metal `trap` |
+| Precise MTIP entry and state restoration | `tb_timer_interrupt_core`, interrupt assertions, FreeRTOS SoC |
 
 ### 4.2 Microarchitectural and interface requirements
 
-| Invariant | Principal evidence |
+| Requirement | Principal evidence |
 |---|---|
-| A valid instruction retires or traps at most once | MEM-wait integration checks, retirement-event counts, software harness history |
 | EX/MEM forwarding wins over an older MEM/WB match | `tb_forwarding_unit`, `tb_pipeline_forwarding` |
-| An adjacent load consumer receives exactly one bubble with the default TCM | `tb_hazard_unit`, `tb_pipeline_forwarding` |
-| False `rs1`/`rs2` field matches do not stall or forward | `tb_hazard_unit`, decoder source-use metadata, directed LUI/load sequence |
-| Request payload remains stable until `req_ready` | `tb_if_stage`, `tb_lsu`, `tb_pipeline_memory_wait` |
-| Delayed responses hold the owner without duplicate commit | `tb_pipeline_memory_wait`, `tb_pipeline_ctrl` |
-| A killed accepted request is drained and cannot return stale state | `tb_if_stage`, `tb_lsu`, redirect and fault scenarios |
-| Taken EX control flushes IF/ID and ID/EX; not-taken control does not | `tb_pipeline_ctrl`, `tb_pipeline_control` |
-| Older trap/fault/wait wins over younger redirect or execution | `tb_pipeline_ctrl`, `tb_pipeline_control` |
-| Wrong-path register, CSR, memory, and MDU side effects are suppressed | `tb_pipeline_forwarding`, `tb_pipeline_control`, sentinel checks |
-| Reset clears control state without resetting the TCM array | `tb_reset_sync`, `tb_rv32_tcm`, `tb_fpga_top` |
+| A load consumer receives the documented interlock | `tb_hazard_unit`, `tb_pipeline_forwarding` |
+| CSR stalls are limited to conflicting architectural state | `tb_hazard_unit`, `tb_csr_core` |
+| Requests remain stable under backpressure | `tb_if_stage`, `tb_lsu`, `tb_pipeline_memory_wait`, protocol assertions |
+| Delayed responses cannot duplicate retirement | `tb_pipeline_memory_wait`, retirement assertions |
+| Redirected, killed, or pre-reset responses are drained | IF and LSU unit tests, control-flow scenarios, protocol assertions |
+| Older waits, faults, and traps defeat younger redirects | `tb_pipeline_ctrl`, `tb_core_control_flow` |
+| MTIP waits only for unresolved older interrupt-state writers | `tb_timer_interrupt_core`, interrupt assertions |
+| Enabling/disabling CSR commits affect MTIP without a shadow instruction | `tb_timer_interrupt_core`, interrupt assertions |
+| Timer split writes and demux ownership remain safe | `tb_rv32_mtimer`, `tb_rv32_mem_demux`, FreeRTOS SoC |
+| UART RX/TX and GPIO register behavior | `tb_rv32_uart`, `tb_rv32_gpio`, FreeRTOS SoC |
 
-The tables above retain the requirement-to-checker mapping for dependencies,
-priority collisions, waits, redirects, and precise squash. Cycle-level action
-semantics are defined in [Pipeline and control](pipeline-control.md), not
-duplicated here.
+## 5. Directed RTL inventory
 
-## 5. Unit verification
+### 5.1 Unit verification
 
-The 17 unit tests isolate datapath, protocol, and state-machine behavior before
-full-pipeline interactions can mask a defect.
+| Group | Testbenches |
+|---|---|
+| Integer datapath and decode | `tb_alu`, `tb_imm_gen`, `tb_decoder`, `tb_branch_unit` |
+| Architectural state and stages | `tb_regfile`, `tb_if_stage`, `tb_id_stage`, `tb_ex_stage`, `tb_csr` |
+| Dependencies and control | `tb_forwarding_unit`, `tb_hazard_unit`, `tb_pipeline_ctrl` |
+| RV32M and load/store | `tb_mul_unit`, `tb_div_unit`, `tb_lsu` |
+| Memory and reset | `tb_rv32_tcm`, `tb_reset_sync` |
+| SoC peripherals and fabric | `tb_rv32_mtimer`, `tb_rv32_uart`, `tb_rv32_gpio`, `tb_rv32_mem_demux` |
 
-| Testbench | Verification responsibility | Baseline checks |
-|---|---|---:|
-| `tb_alu` | Arithmetic, logic, comparison, and shift boundaries | 32 |
-| `tb_imm_gen` | I/S/B/U/J immediate reconstruction and sign extension | 21 |
-| `tb_decoder` | Legal RV32IM/Zicsr decode and illegal encodings | 73 |
-| `tb_branch_unit` | Signed/unsigned branches and control targets | 26 |
-| `tb_regfile` | `x0`, x1-x31, synchronous write behavior | 72 |
-| `tb_reset_sync` | Asynchronous assertion and synchronous release | 15 |
-| `tb_rv32_tcm` | Dual-port access, byte writes, latency, and range errors | 86 |
-| `tb_lsu` | Lane formatting, extraction, faults, backpressure, kill/drain | 438 |
-| `tb_if_stage` | Fetch sequencing, request holds, redirect, stale-response discard | 339 |
-| `tb_id_stage` | Decode/register-read integration and same-cycle WB bypass | 15 |
-| `tb_forwarding_unit` | Independent operands, result classes, producer priority | 23 |
-| `tb_hazard_unit` | Load-use/CSR dependencies and source qualification | 41 |
-| `tb_mul_unit` | Four multiply variants, boundary vectors, hold, and kill | 755 |
-| `tb_div_unit` | Four divide/remainder variants, identities, corner cases, hold, and reset | 8,041 |
-| `tb_ex_stage` | ALU/control/CSR/MDU integration and EX acceptance | 43 |
-| `tb_pipeline_ctrl` | All action masks, drain state, and priority collisions | 28 |
-| `tb_csr` | CSR access, counters, trap entry, and `MRET` state | 47 |
+Printed deterministic check counts are stimulus-vector counts, not coverage
+percentages.
 
-The check counts describe the current deterministic vector set; they are not a
-coverage percentage and should not be used to compare verification quality
-between blocks.
+### 5.2 Pipeline and SoC invariants
+
+| Testbench | Acceptance responsibility |
+|---|---|
+| `tb_rv32_core` | End-to-end RV32IM execution and retirement stream |
+| `tb_csr_core` | Zicsr dependencies, counters, precise traps, and return |
+| `tb_timer_interrupt_core` | MTIP arbitration, drain, CSR-writer interlock, and post-commit enable/disable |
+| `tb_soc_tcm_top` | Core, TCM, timer/peripheral fabric, and completion boundary |
+| `tb_pipeline_forwarding` | RAW matrix, forwarding priority, and load-use behavior |
+| `tb_pipeline_memory_wait` | Request backpressure, delayed response, global hold, and single retirement |
+| `tb_core_control_flow` | Branch/jump recovery, exception priority, trap drain, and `MRET` |
+| `tb_freertos_soc` | Scheduler/tick execution plus serial UART, GPIO, timer, and mailbox behavior |
 
 ## 6. Integration verification
 
-| Testbench | Scope | Reproduced baseline |
-|---|---|---|
-| `tb_rv32_core` | End-to-end RV32IM pipeline and retirement stream | 191 cycles, 27 trace events |
-| `tb_csr_core` | Zicsr dependencies, counters, precise traps, and return | 51 cycles |
-| `tb_soc_tcm_top` | Core/TCM boundary and retirement-qualified mailbox | 32 checks |
-| `tb_fpga_top` | Reset release, initialized image, heartbeat, and status pins | 33 checks |
-| `tb_pipeline_forwarding` | RAW matrix, result classes, control consumers, and load-use | 237 cycles, 57 checks, 4 load-use bubbles |
-| `tb_pipeline_memory_wait` | Request backpressure, delayed response, holds, and single retirement | 125 cycles, 96 MEM-wait cycles, 32 request-backpressure cycles |
-| `tb_pipeline_control` | Branch/jump recovery, exception priority, trap drain, and `MRET` | 87 cycles, 44 checks, 2 precise traps |
+Integration acceptance deliberately exercises collisions that leaf tests
+cannot prove in isolation: simultaneous forwarding matches, load-use plus
+memory wait, held-operand refresh, redirect against wrong-path MDU/store,
+synchronous trap against pending MTIP, CSR enable/disable at commit, and
+backpressured or delayed memory responses. The result is judged at retirement
+or at the external interface after all older work has resolved.
 
-Directed pipeline programs are encoded with helpers in
-`tb/common/rv32_tb_pkg.sv`. Expected signatures remain independent of the RTL
-decoder, while readable instruction construction keeps failures auditable.
-
-The `make test` values in Sections 5–7 were reproduced locally on 2026-08-14.
-The ACT4 baseline is tracked separately because it is not part of `make test`.
-
-## 7. Software and architectural regressions
-
-### 7.1 Bare-metal programs
-
-The [software environment](software.md) builds freestanding ELF32 little-endian
-binaries with `-march=rv32im_zicsr -mabi=ilp32` and loads them through the same
-core/TCM hierarchy used by ISA tests.
-
-| Program | Principal coverage | Baseline |
-|---|---|---|
-| `smoke` | Startup, ABI, stack alignment, initialized data, BSS, calls, memory, RV32M, and identification CSRs | 451 cycles, 171 trace events, 0 traps |
-| `trap` | ECALL, EBREAK, illegal instruction, `mcause/mepc/mtval`, handler return, and three `MRET` recoveries | 838 cycles, 346 trace events, 3 traps |
-
-Runtime, linker, mailbox, and image details are documented in
-[Software](software.md).
-
-### 7.2 Pinned `riscv-tests`
-
-The repository vendors a minimal source snapshot from commit
-`447a5fcb8253627ddb5f6a226f64e43463afcdd5`. The manifest runs 40 in-scope
-`rv32ui` programs and all 8 `rv32um` programs independently on the complete
-pipeline.
-
-`fence_i` is excluded because Zifencei is outside the design scope. `ma_data`
-is excluded because it assumes successful misaligned data accesses, while this
-execution environment deliberately raises precise misalignment traps. These
-are scope exclusions, not passing waivers. The exact program matrix is
-maintained in `sw/isa/tests.mk`; upstream provenance is pinned in
-`third_party/riscv-tests/UPSTREAM.md`.
-
-### 7.3 ACT4 with Sail
-
-ACT4 release 4.0.0 is pinned at commit
-`a7c99303516f4e668f7488f172043392e23b9dfd`. The checked-in UDB configuration
-selects I 2.1, M 2.0, Zicsr 2.0, RV32 little-endian execution, and the documented
-misalignment/trap policy. Sail RISC-V 0.10 supplies expected signatures; ACT4
-then builds 47 self-checking ELFs that run on the RTL.
-
-The ACT4 result is 39/39 RV32I and 8/8 RV32M. Privileged ACTs are disabled
-because the RTL implements only a minimal M-mode subset. The ACT4 TCM is
-expanded to 1 MiB for generated images; this simulation parameter does not
-change the 64 KiB FPGA configuration. Reproducible DUT configuration is kept
-under `verification/act4/config`, while the pinned bootstrap and artifact flow
-is implemented by the top-level `Makefile` and `verification/act4/run.py`.
+The FreeRTOS bench boots the pinned image on the production 64 KiB SoC,
+decodes serial UART TX, drives UART RX, observes GPIO activity, classifies
+trap entries from `mcause`, and checks the report block. Exact
+Verilator/Questa cycle and event counts belong to
+[Hardware validation §3](hardware-validation.md#3-functional-and-architectural-evidence),
+not to this strategy document.
 
 <p align="center">
-  <a href="images/act4.png">
-    <img
-      src="images/act4.png"
-      alt="ACT4 4.0.0 regression showing all 47 RV32I and RV32M tests passing"
-      width="900"
-    >
+  <a href="images/freertos-verilator.png">
+    <img src="images/freertos-verilator.png" alt="FreeRTOS production-SoC integration PASS on Verilator" width="900">
   </a>
 </p>
 
-<p align="center"><em>Sail-backed ACT4 evidence: 39 RV32I and 8 RV32M
-architectural tests passing on the RTL.</em></p>
+<p align="center"><em>Verilator observes the expected scheduler, timer-trap,
+yield, MRET, and GPIO activity before architectural completion.</em></p>
 
-## 8. Regression operation
+<p align="center">
+  <a href="images/freertos-questa.png">
+    <img src="images/freertos-questa.png" alt="Matching FreeRTOS production-SoC integration PASS on Questa" width="900">
+  </a>
+</p>
 
-### 8.1 Primary commands
+<p align="center"><em>The independent Questa run matches the acceptance
+counts within the documented one-cycle harness difference.</em></p>
+
+## 7. Software and independent architectural suites
+
+### 7.1 Bare-metal programs
+
+| Program | Principal coverage |
+|---|---|
+| `smoke` | Startup, ILP32 ABI, data/BSS, calls, memory, RV32M, and identification CSRs |
+| `trap` | ECALL, EBREAK, illegal instruction, trap CSRs, handler recovery, and `MRET` |
+
+### 7.2 Pinned `riscv-tests`
+
+The minimal source snapshot is pinned at commit
+`447a5fcb8253627ddb5f6a226f64e43463afcdd5`. It runs 40 in-scope
+`rv32ui` and all eight `rv32um` programs. `fence_i`
+is excluded because Zifencei is outside scope; `ma_data` expects
+successful misaligned accesses while this core traps them. These are declared
+scope exclusions, not passing waivers.
+
+### 7.3 ACT4 with Sail
+
+ACT4 4.0.0 is pinned at commit
+`a7c99303516f4e668f7488f172043392e23b9dfd`. The configuration selects
+I 2.1, M 2.0, Zicsr 2.0, RV32 little-endian execution, and the project trap
+policy; Sail RISC-V 0.10 supplies expected signatures. Privileged ACTs remain
+disabled because the core implements only the documented M-mode subset.
+
+<p align="center">
+  <a href="images/act4.png">
+    <img src="images/act4.png" alt="ACT4 RV32I and RV32M self-checking regression PASS log" width="620">
+  </a>
+</p>
+
+<p align="center"><em>ACT4 4.0.0 independent architectural regression:
+47 self-checking RV32I/RV32M tests complete successfully.</em></p>
+
+## 8. Regression operation and failure triage
 
 | Command | Purpose |
 |---|---|
-| `make lint` | Lint core, TCM, SoC, reset synchronizer, and FPGA top |
-| `make unit` | Run all 17 unit tests |
-| `make integration` | Run all 7 integration tests |
-| `make gate4` | Run forwarding, memory-wait, and control acceptance tests |
+| `make lint` | Strict lint of synthesizable boundaries |
+| `make unit` | Run all 21 unit tests |
+| `make integration` | Run all 7 directed integration tests |
+| `make assertions` | Focus protocol, retirement, and interrupt assertion stress |
 | `make baremetal` | Build and execute both freestanding programs |
+| `make freertos` | Verify source hashes, build, and run the FreeRTOS SoC demo |
 | `make isa` | Run all 48 pinned `riscv-tests` programs |
-| `make test` | Run lint, 24 RTL simulations, bare-metal, and ISA regression |
-| `make act4` | Generate and run the separate 47-test ACT4 I/M regression |
-| `make questa-check` | Run the 11-test local Questa debug/evidence portfolio |
+| `make test` | Run the complete public open-source gate |
+| `make act4` | Run the separate 47-test Sail-backed suite |
+| `make questa-check` | Cross-check the curated RTL portfolio locally |
+| `make questa-freertos-run` | Cross-check FreeRTOS locally |
 
-One test can be isolated with its target name, for example:
+For a failure, reproduce the narrow target first, retain the first assertion or
+`$fatal` message, then inspect retirement/signature output before
+opening a waveform. Examples:
 
 ```sh
-make tb_pipeline_control
+make tb_timer_interrupt_core
 make isa-rv32ui-jalr
-make act4-test ACT4_TEST='M-div*'
+make baremetal-smoke BAREMETAL_PLUSARGS='+trace=/tmp/smoke.csv'
 ```
 
-Generated Verilator models, software images, traces, Questa libraries, and
-ACT4 work trees are kept below `/tmp/rv32im-core-*`. This avoids polluting the
-repository and supports checkout paths containing spaces.
+Generated models, images, traces, and simulator databases remain below
+`/tmp/rv32im-core-*`, keeping the checkout clean and supporting paths
+that contain spaces.
 
-### 8.2 Continuous integration
+## 9. CI and evidence retention
 
-`.github/workflows/rtl-regression.yml` runs `make test` on pushes, pull
-requests, and manual dispatch. The job installs the open-source RTL and RISC-V
-toolchain, prints tool versions, and uploads ELF, map, disassembly, and trace
-diagnostics when the ISA job fails.
+`.github/workflows/rtl-regression.yml` runs `make test` on
+pushes, pull requests, and manual dispatch. It restores shared
+`riscv-tests` sources at the pinned commit and uploads software/ISA
+diagnostics on failure. The path-filtered ACT4 workflow installs checksum-pinned
+tool/model inputs, runs `make act4`, and uploads signatures and RTL
+artifacts on failure.
 
-`.github/workflows/act4-regression.yml` is path-filtered to RTL and ACT4-relevant
-changes. It checks the ACT4 commit, Sail archive checksum, and Z3 checksum, then
-runs `make act4`; failure artifacts are retained for diagnosis. Questa remains
-a local debug companion because commercial simulator licensing is unsuitable
-for the required public CI gate.
-
-## 9. Failure triage and waveform policy
-
-Use the narrowest failing layer first:
-
-1. reproduce the exact target without parallel jobs;
-2. inspect the first `$fatal` and expected/actual values;
-3. for software, map the failing retirement PC to the `.dump` file;
-4. rerun with a CSV retirement trace;
-5. open the matching curated Questa view only when cycle-level causality is
-   still required;
-6. preserve a minimal failing vector, program, ELF, or seed as a regression.
-
-Example software trace capture:
-
-```sh
-make baremetal-smoke \
-  BAREMETAL_PLUSARGS='+trace=/tmp/smoke.csv +max_cycles=300000'
-
-make isa-rv32ui-add \
-  ISA_PLUSARGS='+trace=/tmp/rv32ui-add.csv +max_cycles=300000'
-```
-
-Waveforms explain timing but are not the pass/fail oracle. Screenshots used as
-portfolio evidence must be paired with a self-checking PASS transcript and a
-caption stating the stimulus, invariant, and observed cycle window. The
-curated signal groups and capture procedure are documented in
-[Waveform debug](waveform-debug.md).
+Questa remains a local cross-check because a commercial license is not a
+public-CI prerequisite. A PASS claim must identify the source revision,
+relevant tool versions, and the command set; failure-only CI artifacts are not
+a substitute for the frozen validation record.
 
 ## 10. Sign-off policy
 
-An RTL change affecting decode, execution, hazards, LSU, control, CSR, or
-retirement is acceptable for the documented RV32IM baseline only when:
+For a change that affects architectural or SoC behavior:
 
-1. `make test` completes without an unexplained lint warning or test failure;
-2. `make act4` passes for changes that can affect I/M architectural behavior;
-3. directed CSR/trap tests and both bare-metal programs pass for changes to
-   exception, CSR, counter, or retirement logic;
-4. request/response and precise-squash tests pass for memory/control changes;
-5. documentation, source manifests, and external-suite provenance remain
-   consistent with the implementation.
+1. run `make test` from the intended source revision;
+2. run the focused assertion/integration target for the changed mechanism;
+3. run `make act4` for I/M-visible behavior;
+4. cross-check the affected portfolio and FreeRTOS test on Questa;
+5. regenerate implementation and board evidence when making an FPGA claim;
+6. record the source, tool, image, and artifact identity in
+   [Hardware validation](hardware-validation.md).
 
-FPGA-specific changes additionally require synthesis/implementation review and
-an on-board smoke run. A public hardware claim should include board revision,
-bitstream and firmware hashes, plus a photograph or logic-analyzer capture.
-The complete procedure and current evidence boundary are defined in
-[FPGA implementation](fpga.md).
+### Open verification work
 
-### 10.1 Open verification work
+- retirement-stream differential testing against an independent ISA model;
+- constrained-random collision testing and functional/code coverage closure;
+- formal proof of selected control and memory-protocol properties;
+- complete privileged-architecture conformance beyond the implemented subset.
 
-The following items are useful extensions, not hidden prerequisites of the
-current passing baseline:
-
-- retirement-stream differential checking against Spike or another independent
-  architectural model;
-- deterministic constrained-random instruction generation with retained seeds;
-- formal properties for handshakes, single retirement, and precise squash;
-- simulator code coverage and requirement-linked functional coverage;
-- asynchronous interrupt verification after the missing architectural state is
-  implemented;
-- cache/MMU/coherency verification if those blocks enter the design scope.
-
-Until implemented, these items must not appear in project or CV claims as
-completed verification methods.
-
-## 11. Adding verification content
-
-- Add a leaf or integration testbench under `tb/unit` or `tb/integration`, add
-  its source list and target to the top-level `Makefile`, and keep it
-  self-checking.
-- Add readable directed instruction encoders to `tb/common/rv32_tb_pkg.sv`
-  rather than copying decoder logic into a scoreboard.
-- Add a freestanding software test under `sw/tests` and register it in
-  `sw/tests/programs.mk`.
-- Change the public ISA corpus only through `sw/isa/tests.mk`, with provenance
-  retained in `third_party/riscv-tests/UPSTREAM.md` and exclusion rationale
-  updated in this document.
-- Add ACT4 configuration changes under `verification/act4/config` and rerun the
-  complete generated count, not only a filtered test.
-- Update this traceability matrix whenever a requirement, checker, or public
-  verification claim changes.
-
-## 12. References
-
-- [RV32I Base Integer Instruction Set, Version 2.1](https://docs.riscv.org/reference/isa/v20260120/unpriv/rv32.html)
-- [M Extension for Integer Multiplication and Division, Version 2.0](https://docs.riscv.org/reference/isa/v20260120/unpriv/m-st-ext.html)
-- [Zicsr Extension for CSR Instructions, Version 2.0](https://docs.riscv.org/reference/isa/v20260120/unpriv/zicsr.html)
-- [Machine-Level ISA, Version 1.13](https://docs.riscv.org/reference/isa/v20260120/priv/machine.html)
-- [RISC-V Architectural Certification Tests](https://github.com/riscv/riscv-arch-test/tree/4.0.0)
-- [Pinned `riscv-tests` provenance](../third_party/riscv-tests/UPSTREAM.md)
+The current FPGA result is artifact-hash identified but was captured from the
+board-integration worktree rather than a clean release tag. Closing that
+source-to-bitstream provenance is a release-packaging task; it does not
+invalidate the recorded functional, timing, or board observations.

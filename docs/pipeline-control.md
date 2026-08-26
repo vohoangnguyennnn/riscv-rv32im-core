@@ -1,39 +1,44 @@
 # Pipeline and Control Microarchitecture
 
-This document specifies the implemented cycle-level control behavior of the
-RV32IM five-stage core. It defines how instructions advance, wait, bypass data,
-recover from control transfers, and take precise synchronous traps. The
-descriptions and priorities below are derived from the checked-in RTL, with the
-RISC-V specifications used as the architectural reference.
+This document specifies the implemented cycle-level behavior of the RV32IM
+five-stage pipeline: packet movement, dependency handling, backpressure,
+control recovery, and precise trap ordering. The programmer-visible contract
+is defined in [Architecture](architecture.md); verification ownership is in
+[Verification](verification.md), and signal-level debug guidance is in
+[Waveform debug](waveform-debug.md).
 
-For the programmer-visible contract and supported ISA subset, see
-[Architecture](architecture.md). Test methodology, requirement traceability,
-and current evidence are defined in [Verification](verification.md), with
-waveform-specific guidance in [Waveform debug](waveform-debug.md).
+<p align="center">
+  <a href="images/pipeline-diagram.png">
+    <img src="images/pipeline-diagram.png" alt="Five-stage IF-ID-EX-MEM-WB stage diagram with interstage hazard markers" width="1050">
+  </a>
+</p>
+
+<p align="center"><em>High-level IF–ID–EX–MEM–WB stage sequence with
+interstage hazard/bubble markers. The hold, flush, redirect, and retirement
+rules that actually govern packet flow are specified in the sections below,
+not depicted in this diagram.</em></p>
 
 ## 1. Control model and invariants
 
-The processor is single-hart, single-issue, in order, and non-speculative at
-architectural retirement. Instructions may be fetched down an unresolved
-control path, but GPR writes, normal CSR writes, trap-state updates, and
-retirement are all qualified at WB. A non-trapping store updates memory when
-its request is accepted in MEM, only after older events can no longer squash
-it, and retires after its completion response reaches WB.
+The core is single-hart, single-issue, and in order. Instructions may be
+fetched beyond an unresolved control transfer, but architectural state changes
+remain ordered. GPR writes, normal CSR writes, trap-state updates, and
+retirement are qualified at MEM/WB. A store updates memory through the LSU in
+MEM only after older events can no longer squash it, and retires after its
+response completes.
 
-The control design preserves five invariants:
+Five invariants govern the control implementation:
 
-1. **Program order:** a younger instruction never retires before an older one,
-   and memory requests remain ordered.
-2. **Single completion:** a held instruction cannot retire, write a CSR, or
-   update `minstret` more than once.
-3. **Precise traps:** older instructions may complete; the faulting instruction
-   and every younger instruction have no architectural side effects.
-4. **Stable transactions:** an accepted or backpressured memory transaction is
-   either completed or explicitly drained; it is never silently abandoned.
-5. **Age-based priority:** an older wait, fault, or trap overrides every younger
-   redirect or dependency event in the same cycle.
+1. **Program order:** no younger instruction retires before an older one.
+2. **Single completion:** a held packet cannot retire or update state twice.
+3. **Precise traps:** older work may complete; the offender and younger work
+   have no architectural side effects.
+4. **Stable transactions:** a backpressured or accepted memory request remains
+   stable and is completed or explicitly drained.
+5. **Age priority:** an older trap, fault, or wait defeats every younger event
+   in the same cycle.
 
-The four interstage registers use a valid-bit protocol:
+The datapath carries typed packets through four valid-bit boundaries:
 
 ```text
  imem -> IF -> IF/ID -> ID -> ID/EX -> EX -> EX/MEM -> MEM -> MEM/WB -> WB
@@ -43,42 +48,31 @@ The four interstage registers use a valid-bit protocol:
           hazard_unit + forwarding_unit + pipeline_ctrl
 ```
 
-`valid=0` denotes a bubble. Payload fields in an invalid packet are not
-architecturally meaningful and are cleared by reset or flush. Every pipeline
-register applies the same storage priority:
+`valid=0` is a bubble. Invalid payload fields are not architecturally
+meaningful. Every pipeline register uses the same storage priority:
 
 ```text
 reset > flush > enable > hold
 ```
 
-This rule is important when an action asserts both an enable and a flush:
-flush wins and the destination receives a bubble.
+This matters when an action both enables and flushes a boundary: the next
+state is a bubble, not the combinational input packet.
 
-## 2. Stage and boundary ownership
+## 2. Boundary ownership and commit
 
-| Boundary | Packet role | Event that may retain it |
+| Boundary | Packet ownership | Reason it may remain occupied |
 |---|---|---|
-| IF response / IF-ID | Fetched PC, instruction, and fetch exception | Decode interlock, front-end hold, or fetch response buffering |
-| ID/EX | Decoded controls, source identities and snapshots, immediate, and exception | Blocking EX operation or older MEM wait |
-| EX/MEM | Execution result, store data, CSR result, control metadata, and exception | Blocking LSU transaction |
-| MEM/WB | Final writeback data, retired store metadata, control metadata, and exception | Never intentionally held after commit; a MEM wait inserts a bubble instead |
+| IF response / IF-ID | Fetched PC, instruction, fetch exception | ID interlock or response buffering |
+| ID/EX | Decoded controls, source IDs/values, immediate, exception | Blocking EX/MDU operation or older MEM wait |
+| EX/MEM | Result, store data, CSR/control metadata, exception | Blocking LSU request/response |
+| MEM/WB | Final writeback, memory trace, control and exception metadata | Not intentionally held after commit |
 
-The controller distinguishes four storage operations:
+Normal operation advances all four boundaries and permits one issue and one
+retirement per cycle. A controller action may instead hold a packet, capture
+it into the next boundary and clear its old slot, or flush it as wrong-path or
+fault-younger work.
 
-- **advance** captures the stage's combinational next packet;
-- **hold** retains the current registered packet;
-- **bubble** clears a boundary so no instruction occupies the next stage;
-- **flush** invalidates a packet because it is reset, wrong-path, or younger
-  than a fault.
-
-During an unconstrained cycle, all boundaries advance. The core can then issue
-and retire up to one instruction per cycle. Actual throughput is reduced only
-by a dependency interlock, a taken control transfer, EX/MEM backpressure, or a
-trap sequence.
-
-## 3. Retirement and architectural state updates
-
-MEM/WB is the sole retirement, GPR/CSR commit, and trap-entry point:
+MEM/WB is the only retirement and architectural commit source:
 
 ```text
 wb_trap      = mem_wb.valid &&  mem_wb.exc.valid
@@ -87,117 +81,89 @@ wb_reg_write = wb_retire && mem_wb.reg_write && (mem_wb.rd != x0)
 wb_csr_write = wb_retire && mem_wb.csr_write
 ```
 
-A normal WB packet may write one GPR, commit one explicit CSR update, increment
-`minstret`, and emit one retirement event. A trapping packet emits a trap trace
-but does not retire and cannot write a GPR, CSR through the normal CSR path, or
-memory.
+A normal packet may write one GPR, commit one explicit CSR operation,
+increment `minstret`, and emit one retirement trace. A trap packet emits a
+trap trace but does not retire or carry a GPR, CSR, `MRET`, or memory side
+effect.
 
-Memory is the deliberate exception to WB-only state update. An aligned store
-drives its byte strobes and data through the LSU in MEM. The in-order controller
-prevents that request from being issued behind an older unresolved trap, and
-the store is reported as retired only after the memory response has completed
-and its metadata reaches MEM/WB.
+Memory writes are the intentional exception to WB-only state update. The LSU
+issues aligned byte strobes in MEM, but the store is reported as retired only
+after its response reaches MEM/WB. During `mem_wait`, an older MEM/WB packet
+commits on the current edge and MEM/WB is then bubbled rather than held. This
+prevents repeated writeback, CSR updates, and retirement counts.
 
-When MEM is waiting, the existing MEM/WB packet is allowed to commit on the
-current edge and MEM/WB is then cleared. It is not held. This prevents repeated
-register writes, repeated CSR writes, and duplicate retirement counts during a
-long data-memory transaction.
+## 3. Dependencies and forwarding
 
-## 4. GPR dependency control
+### 3.1 GPR RAW handling
 
-### 4.1 Source qualification
+Decode marks actual operand use with `uses_rs1` and `uses_rs2`. A RAW match
+requires a valid, non-trapping producer that writes a nonzero destination and
+a consumer that semantically uses the matching source. Encoded but unused
+instruction fields therefore do not create false hazards.
 
-Decode marks whether each encoded source field is semantically consumed with
-`uses_rs1` and `uses_rs2`. A RAW match requires all of the following:
+EX selects each operand independently. The youngest available producer wins:
 
-```text
-producer.valid
-&& producer.reg_write
-&& !producer.exc.valid
-&& producer.rd != x0
-&& consumer.uses_rsN
-&& producer.rd == consumer.rsN
-```
-
-This prevents false dependencies on unused instruction fields, `x0`, bubbles,
-and instructions that will trap.
-
-### 4.2 EX forwarding
-
-Two independent muxes select the newest available value for `rs1` and `rs2`.
-The younger EX/MEM producer has priority over MEM/WB when both match.
-
-| Source | Eligibility | Forwarded value |
+| Source | Eligibility | Value |
 |---|---|---|
-| ID/EX snapshot | Default | Register-file value captured in ID, including WB-to-ID bypass |
-| EX/MEM | Valid non-trapping GPR writer, `rd != x0`, and not a load | ALU/MDU result, `PC+4`, or old CSR value selected by `wb_sel` |
-| MEM/WB | Valid non-trapping GPR writer, `rd != x0` | Final architectural `wb_data`, including completed loads |
+| ID/EX snapshot | Default | Decode value, including same-cycle WB-to-ID bypass |
+| EX/MEM | Valid non-trapping GPR writer; not an incomplete load | EX result, `PC+4`, or old CSR value |
+| MEM/WB | Valid non-trapping GPR writer | Final `wb_data`, including completed loads |
 
-The forwarded operands are shared by all EX consumers: ALU operations, branch
-comparisons, the JALR base, load/store address generation, store data, register
-forms of CSR operations, and MUL/DIV operands. There is no separate control
-dependency interlock and no ID-stage branch forwarding path.
+Forwarded values feed every EX consumer: ALU, branch compare, JALR base,
+address generation, store data, CSR register forms, and MUL/DIV operands.
 
-### 4.3 Load-use interlock
+An immediately following load consumer cannot use EX/MEM forwarding because
+the load data is not yet available. The load-use action holds PC and IF/ID,
+allows the load to advance, and bubbles ID/EX:
 
-A load result is unavailable in EX/MEM, so an immediately following consumer
-cannot be satisfied by ordinary forwarding. The hazard detector asserts
-`load_use` only when the valid, non-trapping ID/EX producer is a load that
-writes the decoded consumer's used source register.
-
-The controller then holds PC and IF/ID, allows the load to advance, and clears
-ID/EX. With the default one-cycle TCM, the timing is:
-
-| Cycle | Load | Consumer | Control effect |
+| Cycle | Load | Consumer | Result |
 |---:|---|---|---|
-| N | EX | ID | Detect dependency |
-| N+1 | MEM | ID | Hold consumer; bubble in EX |
-| N+2 | WB | EX | Consumer receives load value from MEM/WB |
+| N | EX | ID | Dependency detected |
+| N+1 | MEM | ID | Consumer held; EX bubble |
+| N+2 | WB | EX | MEM/WB value forwarded |
 
-Exactly one data-hazard bubble is required for the default TCM. If the memory
-response is delayed, the separate `mem_wait` action extends the hold until the
-load completes; the hazard detector does not count memory latency as additional
-load-use bubbles.
+This is one data-hazard bubble with the default TCM. Additional memory latency
+is counted as `mem_wait`, not as more load-use bubbles.
 
-### 4.4 WB-to-ID and held-operand preservation
+ID also bypasses a same-cycle WB write explicitly. If ID/EX remains held after
+its producer leaves the forwarding windows, a matching WB write refreshes the
+stored source snapshot. A long MDU or memory wait therefore cannot expose a
+stale operand.
 
-ID includes an explicit same-cycle WB bypass, so register-file read-during-write
-semantics do not depend on FPGA RAM behavior.
+### 3.2 CSR ordering
 
-A second corner case occurs when a consumer is already in ID/EX and is held by
-EX or MEM backpressure. Its producer can commit in WB and then disappear from
-the forwarding mux inputs before the consumer fires. While ID/EX is held, a
-matching WB write refreshes the stored `rs1_value` or `rs2_value`. The eventual
-EX operation therefore observes the committed value rather than a stale decode
-snapshot.
+CSR state is read in EX and committed in WB. There is no CSR-value forwarding;
+the hazard unit stalls only for a real architectural conflict:
 
-## 5. CSR ordering interlocks
+| ID consumer | Older ID/EX or EX/MEM condition |
+|---|---|
+| CSR instruction | Actual writer to the same CSR state |
+| `mcycle` / `mcycleh` | Writer to either half of the shared 64-bit counter |
+| `minstret` / `minstreth` | Writer to either half, or any older non-trapping packet whose retirement is still pending |
+| `MRET` | Writer to `mepc` |
 
-CSR state is read in EX and written at WB. The implementation therefore
-serializes consumers in ID behind older uncommitted CSR effects.
+`CSRRW[I]` always writes. `CSRRS[I]` and `CSRRC[I]` write only when `rs1` or
+`zimm` is nonzero. Unrelated CSR addresses do not stall each other. A writer
+already in MEM/WB needs no stall: it commits on the edge that moves the reader
+to ID/EX, and EX observes the updated CSR state.
 
-| ID consumer | Older packets that cause a stall | Reason |
-|---|---|---|
-| Any CSR instruction | Any actual CSR writer in ID/EX or EX/MEM, regardless of address | Conservative program-order serialization |
-| `MRET` | A writer to `mepc` in ID/EX or EX/MEM | `MRET` uses the current `mepc` as its EX target |
-| Read of `minstret` or `minstreth` | Any valid, non-trapping packet in ID/EX or EX/MEM | Each older retirement is an implicit counter write |
+### 3.3 Machine-interrupt state ordering
 
-`CSRRW[I]` always counts as an actual writer. `CSRRS[I]` and `CSRRC[I]` count as
-writers only when their register source or `zimm` mask is nonzero.
+MTIP eligibility uses committed `mstatus.MIE`, `mie.MTIE`, and live
+`mip.MTIP`. A writer to `mstatus` or `mie`, or an `MRET`, in ID/EX or EX/MEM
+holds the ID boundary because its final enable state is not yet known.
 
-No stall is required for a writer already in MEM/WB: it commits on the edge
-that advances the consumer from ID to EX, and the consumer observes the updated
-CSR during its EX cycle. Both load-use and CSR dependencies map to the same ID
-hazard action: hold PC and IF/ID, then inject a bubble into ID/EX.
+Once that packet reaches MEM/WB, the CSR file exposes eligibility from its
+prioritized post-commit next state. A pending MTIP can therefore be injected
+immediately after an enabling write or `MRET`; a disabling write blocks it
+without a shadow instruction. An older EX/MEM wait or redirect still wins, and
+the level-sensitive candidate is reevaluated at the next valid ID boundary.
 
-This policy implements the required per-hart, program-ordered CSR observation
-without adding CSR-value forwarding.
+## 4. Blocking units and transaction lifetime
 
-## 6. Execution and memory backpressure
+### 4.1 EX and MDU acceptance
 
-### 6.1 EX acceptance
-
-EX uses an internal valid/ready contract:
+EX follows a valid/ready contract:
 
 ```text
 ex_result_ready = !wb_trap && !mem_wait && !mem_exception
@@ -205,29 +171,25 @@ ex_fire         = ex_result_valid && ex_result_ready
 ex_wait         = active_ID_EX_packet && !ex_fire
 ```
 
-An ordinary ALU/control/CSR result is combinationally valid. A MUL/DIV result
-becomes valid only when its selected unit responds. A result is transferred to
-EX/MEM, and a control redirect is emitted, only on `ex_fire`.
+ALU, control, and CSR results are combinationally valid. MUL/DIV becomes valid
+only when the selected unit responds. EX/MEM captures a result and a control
+redirect is emitted only on `ex_fire`, so a held instruction cannot redirect
+or complete twice.
 
-During `ex_wait`, PC, IF/ID, and ID/EX hold. The older EX/MEM packet advances,
-and EX/MEM is replaced by a bubble until the held instruction can fire. If an
-older memory instruction is also waiting, the higher-priority `mem_wait` action
-retains EX/MEM instead.
+During the selected EX-wait action, PC, IF/ID, and ID/EX hold while EX/MEM is
+bubbled after any older entry advances. A simultaneous older `mem_wait` keeps
+EX/MEM occupied and has higher priority.
 
-### 6.2 Blocking MUL/DIV
+The multiplier has one operation in flight and registers operands and result
+around the inferred multiply. The restoring divider produces one quotient bit
+per cycle for 32 normal iterations; divide-by-zero, signed overflow, and
+smaller-magnitude cases complete through local architectural shortcuts. Both
+units hold a completed response until accepted. A WB trap or newly completed
+MEM fault kills younger MDU work.
 
-The MDU accepts at most one selected operation at a time. A request is not
-launched while an older MEM transaction, MEM exception, or WB trap owns
-priority. The completed response remains stable until EX accepts it.
+### 4.2 LSU ownership
 
-An older WB trap or newly completed MEM fault asserts `kill` to the MDU. This
-prevents a wrong-path multiply/divide result from surviving a precise squash.
-Division by zero and signed division overflow return the architecturally
-defined RV32M values; neither condition generates an exception.
-
-### 6.3 Blocking LSU
-
-A valid load or store owns EX/MEM until the LSU presents a response:
+A valid load or store owns EX/MEM until the LSU response is available:
 
 ```text
 mem_wait = ex_mem.valid
@@ -236,41 +198,41 @@ mem_wait = ex_mem.valid
         && !lsu_rsp_valid
 ```
 
-`mem_wait` holds every younger packet and EX/MEM, while MEM/WB receives a
-bubble after its older entry commits. Both local alignment faults and external
-bus errors complete through the same LSU response path.
+The LSU permits one transaction. A request held under backpressure preserves
+its command, aligned address, write data, and byte strobes. Local alignment
+faults and external access faults return through the same sticky response
+path. Loads apply little-endian extraction and sign/zero extension; stores
+require a response before architectural completion.
 
-Once a request is asserted under backpressure, its command, aligned address,
-write data, and byte strobes remain stable until acceptance. A response can be
-held until MEM/WB is ready. A killed accepted transaction enters a drop state
-and drains its response before the LSU becomes reusable. Stores require a
-response before they are considered architecturally complete.
+An accepted transaction cannot be cancelled at the external interface. If an
+older WB trap kills it, the LSU marks the transaction for discard and drains
+the response before becoming reusable. Reset applies the same rule: an
+already-accepted request is retained internally only long enough to discard
+its single outstanding response, preventing a pre-reset response from being
+misassociated with post-reset work.
 
-### 6.4 Fetch backpressure and stale responses
+### 4.3 Fetch response ownership
 
-IF similarly permits at most one outstanding instruction request and contains
-a one-entry fall-through/skid response buffer. A backpressured request keeps a
-stable address until accepted.
+IF also permits one outstanding request and has one fall-through/skid response
+slot. A backpressured request keeps a stable address. Flush, redirect, or reset
+invalidates any buffered sequential packet and marks an already-accepted
+request stale; its response is consumed but never delivered to ID.
 
-A flush or redirect invalidates any buffered sequential response and marks an
-older outstanding request as stale. The stale response is consumed but never
-presented to ID. When the old response arrives as a redirect is accepted, IF
-can discard it and launch the target request in the same cycle if the memory
-port is available. This guarantees request/response accounting without allowing
-wrong-path instructions to re-enter the pipeline.
+If a stale response arrives as a redirect is accepted, IF may discard it and
+launch the target request in the same cycle. After reset, any pre-reset
+accepted request is similarly drained before fetching again from
+`RESET_VECTOR`.
 
-## 7. Control-transfer recovery
+## 5. Control-transfer recovery
 
-All baseline control transfers resolve in EX using forwarded operands.
+All implemented control transfers resolve in EX with forwarded operands:
 
 | Instruction | Taken condition | Target |
 |---|---|---|
-| Conditional branch | Comparison selected by `funct3` | `pc + imm` |
+| Conditional branch | `funct3` comparison | `pc + imm` |
 | `JAL` | Always | `pc + imm` |
 | `JALR` | Always | `(forwarded_rs1 + imm) & ~1` |
 | `MRET` | Always | Current `mepc` |
-
-The redirect condition is conceptually:
 
 ```text
 redirect.valid = ex_fire
@@ -279,184 +241,152 @@ redirect.valid = ex_fire
               && !exception
 ```
 
-An accepted EX redirect preserves the control instruction by capturing it in
-EX/MEM, redirects fetch, and flushes the two younger packets in IF/ID and
-ID/EX. `JAL` and `JALR` still retire their `PC+4` link value. A not-taken
-conditional branch neither redirects nor flushes.
+On an accepted redirect, the control instruction is captured into EX/MEM and
+its old ID/EX slot is cleared. IF/ID is flushed, and any buffered or outstanding
+sequential fetch response is invalidated and drained. `JAL` and `JALR` retain
+their `PC+4` link result. A not-taken branch does not redirect or flush.
 
-The redirect packet contains an origin field so the controller interface can
-support a future ID-resolution optimization. The current core emits only
-`REDIRECT_FROM_EX`; the corresponding flush mask always clears IF/ID and ID/EX.
+The core uses `IALIGN=32`. JALR clears target bit zero before the selected
+taken target is checked for four-byte alignment. A target with
+`target[1:0] != 0` raises an instruction-address-misaligned exception on the
+control instruction and suppresses redirect and link-register write. A
+not-taken branch never raises a target-alignment exception.
 
-The core implements fixed 32-bit instructions (`IALIGN=32`). `JALR` first
-clears target bit 0 as required by the ISA, then the selected taken target is
-checked for four-byte alignment. A target with `target[1:0] != 0` raises an
-instruction-address-misaligned exception on the control-transfer instruction
-and suppresses both redirect and link-register write. A conditional branch
-that is not taken never raises this exception.
+Recovery latency depends on instruction-memory response timing. The control
+contract is therefore expressed as packet squash and target-request ownership,
+not as a universal fixed branch penalty.
 
-With the default one-cycle TCM, an accepted taken transfer squashes two younger
-pipeline packets and has a two-cycle control-hazard cost. Longer instruction
-memory latency may increase target-fetch delay, but does not change the flush
-contract.
+## 6. Precise traps and MTIP injection
 
-## 8. Precise synchronous exceptions
+Exceptions travel with the instruction packet. An exception already attached
+to a packet outranks a later check on that packet.
 
-Exceptions travel in the same packet as their PC and instruction. An existing
-packet exception has priority over a later check on that packet.
-
-| Origin | Exception | `mtval` payload |
+| Origin | Exception | `mtval` |
 |---|---|---|
-| IF | Instruction access fault | Faulting fetch address |
+| IF | Instruction access fault | Fetch address |
 | ID | Illegal instruction | Instruction bits |
 | ID | `EBREAK` | Faulting PC |
 | ID | M-mode `ECALL` | Zero |
 | EX | Illegal CSR access | Instruction bits |
-| EX | Taken control target misaligned | Resolved target |
+| EX | Taken target misaligned | Resolved target |
 | MEM | Load/store address misaligned | Effective address |
 | MEM | Load/store access fault | Effective address |
 
-The central controller treats a fetch exception as an ID-boundary exception
-when its packet reaches decode. For a newly selected exception:
+When a new exception is selected, the offender advances one boundary, all
+younger work is flushed, and registered `trap_drain` stops new front-end work.
+Older packets and the offender continue through required EX/MEM waits. At WB,
+trap state is committed once, every remaining pipeline entry is flushed, and
+fetch redirects to the aligned direct-mode `mtvec` base. The offender does not
+retire or increment `minstret`.
 
-1. the offending packet advances toward the next older boundary;
-2. every younger packet and unaccepted younger EX result is flushed;
-3. the registered `trap_drain` state stops the front end;
-4. older packets and the offender continue through any required EX/MEM waits;
-5. when the offender reaches WB, trap state is written and all remaining
-   pipeline entries are flushed;
-6. fetch restarts at the aligned direct-mode `mtvec` base.
+An eligible machine-timer interrupt replaces the decoded ID packet with a
+synthetic exception packet containing the interrupted boundary PC, cause 7,
+`is_interrupt=1`, zero instruction bits, and zero `mtval`. The original
+instruction has not executed and is refetched from `mepc` after `MRET`. An
+attached synchronous exception wins over interrupt injection.
 
-At WB, the trap writes `mepc`, `mcause`, and `mtval`. The faulting packet does
-not increment `minstret`. `MRET` later redirects to `mepc`, subject to the same
-EX acceptance, alignment, and flush rules as other control transfers.
+Exception and interrupt packets drain identically after selection. Trap entry
+saves and clears global interrupt enable at WB. `MRET` redirects in EX but
+restores `MIE/MPIE` only when it retires, so a squashed `MRET` cannot change
+interrupt state.
 
-The core implements synchronous exceptions only. Asynchronous interrupt
-arbitration and `mstatus`/`mie`/`mip` state are outside the current design.
+## 7. Central action priority
 
-## 9. Global control priority
+`pipeline_ctrl` chooses exactly one action per cycle. Source order in the RTL,
+not enum encoding, defines priority:
 
-`pipeline_ctrl` selects exactly one action per cycle. The order below is the
-implemented priority, not enum encoding order:
-
-| Priority | Action | Why it wins |
+| Priority | Action | Architectural reason |
 |---:|---|---|
-| 1 | Reset | Establish benign state before all architectural events |
-| 2 | WB trap | Oldest possible event; commit trap state and redirect `mtvec` |
-| 3 | New MEM exception | Older than all EX/ID work; capture offender in MEM/WB |
-| 4 | MEM wait | EX/MEM still belongs to an older memory instruction |
-| 5 | New EX exception | Preserve the offending EX packet and squash younger work |
-| 6 | EX wait | ID/EX still owns an unaccepted result or active MDU operation |
-| 7 | Registered trap drain | Keep fetch stopped while the selected exception approaches WB |
-| 8 | EX control redirect | Squash younger sequential-path packets |
-| 9 | New ID exception | Advance the offender and stop younger fetch work |
-| 10 | ID hazard | Resolve load-use or CSR ordering with a bubble |
-| 11 | Normal advance | No constraint is active |
+| 1 | Reset | Establish benign state |
+| 2 | WB trap | Oldest event; commit trap and redirect `mtvec` |
+| 3 | New MEM exception | Older than all EX/ID work |
+| 4 | MEM wait | EX/MEM still owns a memory operation |
+| 5 | New EX exception | Preserve offender; squash younger work |
+| 6 | EX wait | ID/EX still owns an unaccepted result |
+| 7 | Registered trap drain | Stop younger work until trap commit |
+| 8 | EX control redirect | Discard younger sequential-path work |
+| 9 | Interrupt-state wait | Await older `mstatus`/`mie`/`MRET` state |
+| 10 | New ID exception | Advance synchronous offender |
+| 11 | New ID interrupt | Advance synthetic MTIP packet |
+| 12 | ID hazard | Resolve load-use or CSR ordering |
+| 13 | Normal advance | No constraint active |
 
-The explicit registered drain at priority 7 is essential: older MEM/EX waits
-remain serviceable, while younger redirects and new ID events cannot restart or
-replace the selected trap sequence.
+The state installed at the next clock edge is:
 
-### 9.1 Action matrix
-
-The table describes the state installed at the next clock edge. “Capture” means
-the current packet transfers to the next boundary before its old boundary is
-cleared.
-
-| Selected action | Fetch / PC | IF/ID | ID/EX | EX/MEM | MEM/WB | Additional effect |
+| Action | Fetch/PC | IF/ID | ID/EX | EX/MEM | MEM/WB | Extra effect |
 |---|---|---|---|---|---|---|
-| Reset | Reset to `RESET_VECTOR` | Clear | Clear | Clear | Clear | Clear drain |
+| Reset | Hold reset PC | Clear | Clear | Clear | Clear | Clear drain |
 | WB trap | Redirect `mtvec` | Clear | Clear | Clear | Clear | Commit trap; clear drain |
-| MEM exception | Stop and discard younger fetch | Clear | Clear | Clear after transfer | Capture offender | Set drain |
-| MEM wait | Hold | Hold | Hold | Hold | Bubble | Older WB entry commits once |
-| EX exception | Stop and discard younger fetch | Clear | Clear after transfer | Capture offender | Advance | Set drain |
-| EX wait | Hold | Hold | Hold | Bubble | Advance | Preserve active EX packet |
-| Trap drain | Hold | Hold empty boundary | Advance | Advance | Advance | Suppress younger events |
-| EX redirect | Redirect target | Clear | Clear after transfer | Capture control packet | Advance | No drain |
-| ID exception | Stop and discard younger fetch | Clear after transfer | Capture offender | Advance | Advance | Set drain |
+| MEM exception | Stop | Clear | Clear | Clear after capture | Capture offender | Set drain |
+| MEM wait | Hold | Hold | Hold | Hold | Bubble | Older WB commits once |
+| EX exception | Stop | Clear | Clear after capture | Capture offender | Advance | Set drain |
+| EX wait | Hold | Hold | Hold | Bubble | Advance | Preserve EX owner |
+| Trap drain | Hold | Hold, normally empty | Advance | Advance | Advance | Suppress younger events |
+| EX redirect | Redirect target | Clear | Clear after capture | Capture control | Advance | No drain |
+| IRQ-state wait | Hold | Hold | Bubble | Advance | Advance | Use post-commit state |
+| ID exception | Stop | Clear after capture | Capture offender | Advance | Advance | Set drain |
+| ID interrupt | Stop | Clear after capture | Capture synthetic trap | Advance | Advance | Set drain |
 | ID hazard | Hold | Hold | Bubble | Advance | Advance | One interlock action |
-| Normal advance | Sequential fetch | Advance | Advance | Advance | Advance | None |
+| Advance | Sequential | Advance | Advance | Advance | Advance | None |
 
-In collision cases, only the highest row in the priority table applies. Key
-consequences include:
+Only the highest-priority row applies in a collision. Important consequences
+are:
 
-- a WB trap beats a younger store request, EX redirect, and all stalls;
-- a MEM wait beats a ready-looking younger EX result;
-- an EX redirect beats an illegal or dependent wrong-path instruction in ID;
-- an ID exception beats a dependency indication for that same boundary;
-- an older wait remains active while `trap_drain` is set.
+- a WB trap prevents a younger memory request, redirect, or stall from winning;
+- a MEM wait defeats a ready-looking younger EX result;
+- a MEM exception kills a simultaneous younger EX redirect or MDU operation;
+- an EX redirect defeats wrong-path ID exception, interrupt, and hazard events;
+- an ID exception defeats interrupt injection and dependency handling at the
+  same boundary;
+- EX/MEM waits remain serviceable while `trap_drain` is active.
 
-## 10. Representative timing expectations
+## 8. Timing observability and verification
 
-| Sequence or event | Required control behavior |
+| Sequence | Required behavior |
 |---|---|
-| ALU producer -> adjacent ALU/branch/store/JALR consumer | Zero bubbles; EX/MEM forwarding |
-| Load -> adjacent consumer | One load-use bubble, then MEM/WB forwarding with default TCM |
-| Load -> one independent instruction -> consumer | Zero data bubbles; MEM/WB forwarding |
-| CSR writer -> CSR reader | Hold reader until older writer reaches commit ordering point |
-| Taken branch/JAL/JALR/MRET | Flush IF/ID and ID/EX; current control instruction continues |
-| Not-taken conditional branch | No redirect and no control flush |
-| MUL/DIV operation | Hold ID/EX until selected MDU response is accepted |
-| Delayed load/store | Hold EX/MEM and all younger packets; bubble MEM/WB after old commit |
-| Synchronous fault | Squash younger work, drain older work, trap once at WB |
+| ALU producer -> adjacent EX consumer | EX/MEM forwarding; no bubble |
+| Load -> adjacent consumer | One load-use bubble, then MEM/WB forwarding |
+| CSR writer -> conflicting reader | Hold until the writer reaches commit ordering |
+| Taken branch/JAL/JALR/`MRET` | Capture control, squash sequential younger work |
+| Not-taken branch | No redirect or control flush |
+| MUL/DIV | Hold ID/EX until the selected response is accepted |
+| Delayed load/store | Hold EX/MEM and younger packets; bubble MEM/WB |
+| Synchronous exception | Squash younger work, drain, trap once at WB |
+| Eligible MTIP | Replace one ID packet, drain, trap once at WB |
 
-These are microarchitectural timing expectations, not application CPI claims.
-The exact duration of MDU, instruction-memory, and data-memory waits depends on
-the selected operation and external ready/valid timing.
+The implementation exposes read-only performance counters without feeding
+them back into control. Stall counters follow the same mutually exclusive
+priority selection as the controller. `perf_redirect` counts accepted EX
+redirects; `perf_squash` counts valid younger IF/ID and fetch packets actually
+discarded. These counters explain measured CPI but do not redefine the control
+contract. Frozen measurements belong in [Performance](performance.md),
+[CoreMark](coremark.md), and [Hardware validation](hardware-validation.md).
 
-## 11. Verification and waveform observability
+Principal directed evidence is:
 
-Control verification combines local invariant tests with full-core retirement
-checking. The principal directed coverage is:
+| Test | Control responsibility |
+|---|---|
+| `tb_pipeline_ctrl` | Action masks, collision priority, drain lifetime |
+| `tb_hazard_unit`, `tb_forwarding_unit` | Source qualification, CSR conflicts, youngest-producer selection |
+| `tb_pipeline_forwarding` | End-to-end RAW paths and wrong-path suppression |
+| `tb_pipeline_memory_wait` | Backpressure, held-operand refresh, single completion |
+| `tb_core_control_flow` | Redirects, exception priority, traps, `MRET` |
+| `tb_timer_interrupt_core` | MTIP injection, enable/disable boundaries, pending retrigger |
+| `tb_freertos_soc` | Repeated MTIP and ECALL yields under software load |
 
-- `tb_pipeline_ctrl`: action masks, registered drain lifetime, and event
-  collisions;
-- `tb_hazard_unit` and `tb_forwarding_unit`: source qualification and
-  forwarding priority;
-- `tb_pipeline_forwarding`: end-to-end RAW paths, load-use bubbles, control
-  operands, and wrong-path suppression;
-- `tb_pipeline_memory_wait`: request backpressure, delayed responses, held
-  operand refresh, and no duplicate retirement;
-- `tb_pipeline_control`: redirects, exception priority, precise traps, and
-  `MRET` recovery.
+Retirement trace is the architectural oracle. Internal packet valids, wait and
+hazard signals, forwarding selects, enable/flush masks, and redirect state
+explain how that result was reached.
 
-For a debug waveform, group pipeline packet `valid`, `pc`, and `insn` fields
-with `load_use_hazard`, `csr_dependency`, the two forwarding selects,
-`ex_wait`, `mem_wait`, all enable/flush outputs, redirect target, and WB trace.
-The retirement trace is the architectural oracle; internal signals explain why
-the observed instruction timing occurred.
+## 9. Design boundary
 
-<p align="center">
-  <img
-    src="images/full-core-pipeline-waveform.png"
-    alt="Full-core waveform showing IF through WB packet flow, forwarding, waits, flushes, redirects, and retirement"
-    width="1100"
-  >
-</p>
+The controller intentionally excludes branch prediction, speculative state
+checkpoints, multiple issue, out-of-order completion, non-blocking caches,
+nested interrupts, and software/external interrupt injection. Adding any of
+these changes the age, cancellation, or commit model and requires a new
+control contract rather than a local mux change.
 
-<p align="center"><em>Representative full-core control window. The waveform is
-supporting microarchitectural evidence; self-checking signatures and retirement
-events remain the pass/fail authority.</em></p>
-
-## 12. Design boundaries
-
-The current controller intentionally does not implement branch prediction,
-speculative state checkpoints, multiple issue, out-of-order completion,
-non-blocking caches, or asynchronous interrupt injection. Adding any of these
-features requires revisiting the age model, cancellation rules, and commit
-contract rather than only changing the redirect mux.
-
-Any future optimization must preserve the invariants in Section 1 and retain
-the existing retirement behavior for the same architectural instruction
-stream.
-
-## 13. Normative references
-
-- [RV32I Base Integer Instruction Set, Version 2.1](https://docs.riscv.org/reference/isa/unpriv/rv32.html)
-- [M Extension for Integer Multiplication and Division, Version 2.0](https://docs.riscv.org/reference/isa/unpriv/m-st-ext.html)
-- [Zicsr Extension for CSR Instructions, Version 2.0](https://docs.riscv.org/reference/isa/unpriv/zicsr.html)
-- [Machine-Level ISA](https://docs.riscv.org/reference/isa/priv/machine.html)
-
-The ISA specifications define architectural results and ordering. The RTL in
-`rtl/core` is the source of truth for pipeline latency, action priority,
-handshake timing, and implementation-specific recovery behavior.
+The checked-in RTL under `rtl/core` is authoritative for implementation timing
+and arbitration. Architectural results remain governed by the RV32I, RV32M,
+Zicsr, and documented machine-mode specifications listed in
+[Architecture](architecture.md#12-normative-references).

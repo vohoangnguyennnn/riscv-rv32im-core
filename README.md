@@ -24,14 +24,19 @@ The repository is organized as an evidence-backed engineering project: architect
 | Software | 2/2 bare-metal smoke tests and FreeRTOS demo passed |
 | ISA suites | 40 RV32I + 8 RV32M pinned riscv-tests; 39 RV32I + 8 RV32M ACT4 |
 | FPGA target | MicroPhase A7-Lite R1.1, Xilinx Artix-7 XC7A35T |
-| Latest Vivado implementation | `smoke.mem`; fully routed at 75 MHz; setup WNS +0.017 ns, hold WHS +0.099 ns |
-| Utilization | 3,785 LUT, 1,994 FF, 16 BRAM, 4 DSP |
-| Power estimate | 0.254 W vectorless post-route estimate; Medium confidence, not board-measured |
+| Latest Vivado implementation | `freertos_demo.mem`; fully routed at 75 MHz; setup WNS +0.070 ns, hold WHS +0.066 ns |
+| Utilization | 3,815 LUT, 2,001 FF, 16 BRAM, 4 DSP, 10 bonded I/O |
+| Power estimate | 0.253 W vectorless post-route estimate; Medium confidence, not board-measured |
 | Directed performance | 35,245 instructions in 50,101 cycles; CPI 1.422, IPC 0.703 |
 | CoreMark | 2.127 CoreMark/MHz, CRC-valid performance run |
-| Prior board bring-up | PASS recorded for the separately hash-identified FreeRTOS image |
+| Board bring-up | FreeRTOS boot, UART, GPIO, PASS/DONE, and reset behavior recorded; exact packaged release-candidate bitstream retest pending |
 
-Results above were recorded on 2026-08-25 against core commit `b16b1b0`. The latest supplied Vivado package was captured from `b16b1b0-dirty` with `TCM_INIT_FILE=smoke.mem`; it must not be treated as the same artifact as the earlier FreeRTOS board image. Exact tool versions, hashes, timing paths, and evidence boundaries are recorded in the [hardware validation report](docs/hardware-validation.md).
+Results above were recorded on 2026-08-25. The current implementation package
+was captured from `e5eb288-dirty` with `TCM_INIT_FILE=freertos_demo.mem` and the
+complete ten-port board boundary. It is a release candidate: regenerate it from
+the final clean commit and program that exact bitstream before tagging `v1.0.0`.
+Exact tool versions, hashes, and evidence boundaries are recorded in the
+[hardware validation report](docs/hardware-validation.md).
 
 ## Engineering highlights
 
@@ -55,7 +60,7 @@ Results above were recorded on 2026-08-25 against core commit `b16b1b0`. The lat
 | MDU | Iterative multiply/divide unit with architectural corner-case handling |
 | Observability | Retirement trace, trap trace, and diagnostic counters |
 
-![Five-stage pipeline and control paths](docs/images/pipeline-diagram.png)
+![Five-stage IF-ID-EX-MEM-WB stage diagram with interstage hazard markers](docs/images/pipeline-diagram.png)
 
 Pipeline control is centralized around architectural validity:
 
@@ -75,6 +80,15 @@ The FPGA-facing SoC integrates the core with a unified true-dual-port TCM and th
 
 *Structural overview of the intended FPGA SoC: 75 MHz clocking, five-stage RV32IM core, dual-port TCM, memory demultiplexer, timer/MTIP, UART, GPIO, and board status outputs.*
 
+<p align="center">
+  <a href="docs/images/memory-map.png">
+    <img src="docs/images/memory-map.png" alt="RV32IM SoC 32-bit memory map showing TCM, machine timer, UART, GPIO, and unmapped regions" width="1000">
+  </a>
+</p>
+
+<p align="center"><em>Default byte-addressed FPGA SoC map; region heights are
+not proportional.</em></p>
+
 | Region | Address | Role |
 |---|---|---|
 | TCM | `0x0000_0000`-`0x0000_FFFF` | 64 KiB instruction/data memory; completion (`tohost`) word at `0x0000_FFFC` |
@@ -93,6 +107,15 @@ The frozen FreeRTOS run demonstrates:
 - UART `READY\n` output and `0xA5` echo;
 - matching architectural behavior in Verilator and Questa.
 
+<p align="center">
+  <a href="docs/images/freertos-verilator.png">
+    <img src="docs/images/freertos-verilator.png" alt="FreeRTOS SoC PASS summary on Verilator" width="850">
+  </a>
+</p>
+
+<p align="center"><em>The production SoC simulation completes with the
+expected MTIP, yield, MRET, and GPIO counts.</em></p>
+
 See [software.md](docs/software.md) for the boot flow, ABI assumptions, trap contract, memory layout, and demo acceptance criteria.
 
 ## Verification
@@ -110,6 +133,15 @@ See [software.md](docs/software.md) for the boot flow, ABI assumptions, trap con
 | Independent ISA | ACT4 RV32I/RV32M | `make act4` |
 | Cross-simulator | Frozen FreeRTOS scenario in Questa | `make questa-freertos-run` |
 
+<p align="center">
+  <a href="docs/images/test-log.png">
+    <img src="docs/images/test-log.png" alt="Complete public Verilator RTL software and ISA regression PASS summary" width="920">
+  </a>
+</p>
+
+<p align="center"><em>Public regression gate: lint, 29 RTL simulations, two
+bare-metal programs, FreeRTOS, and 48 pinned ISA programs pass.</em></p>
+
 The ACT4 run is intentionally reported separately from the pinned riscv-tests count. Pass/fail is determined from architectural signatures, trace invariants, and explicit software completion—not from simulation exit status alone.
 
 Detailed test ownership, checker behavior, expected counts, and residual verification gaps are in [verification.md](docs/verification.md).
@@ -118,25 +150,38 @@ Detailed test ownership, checker behavior, expected counts, and residual verific
 
 ![MicroPhase A7-Lite deployment](docs/images/board.png)
 
-*Earlier FreeRTOS board bring-up; separate from the latest `smoke.mem` report package.*
+*Recorded FreeRTOS board bring-up. The exact bitstream in the current dirty-tree
+release-candidate package still requires one final board retest.*
+
+<p align="center">
+  <a href="docs/images/uart-terminal.png">
+    <img src="docs/images/uart-terminal.png" alt="FreeRTOS READY message and UART echo observed through the board CH340 interface" width="520">
+  </a>
+</p>
+
+<p align="center"><em>Physical UART observation at 115200 8N1: repeated boot
+readiness and character echo through the board CH340 interface.</em></p>
 
 The latest supplied implementation package was generated with Vivado 2024.1 for `xc7a35tfgg484-2`, using a 50 MHz board oscillator and a 75 MHz generated SoC clock.
 
 | Check | Latest report result |
 |---|---:|
 | Route status | Fully routed, 0 unrouted nets |
-| Setup | WNS +0.017 ns, TNS 0.000 ns |
-| Hold | WHS +0.099 ns, THS 0.000 ns |
-| Setup/hold endpoints | 0 failing out of 6,867 |
+| Setup | WNS +0.070 ns, TNS 0.000 ns |
+| Hold | WHS +0.066 ns, THS 0.000 ns |
+| Setup/hold endpoints | 0 failing out of 6,890 |
 | Pulse width | WPWS +5.537 ns |
 | DRC | 0 errors |
 | Clock coverage | 0 unclocked sequential cells, 0 unconstrained endpoints |
 | Bitstream | Generated and hash-identified |
-| Power | 0.254 W estimated; Medium confidence |
+| Power | 0.253 W estimated; Medium confidence |
 
-The worst setup path runs from `id_ex_q[rs2][2]` to `next_pc_q[28]`: 13.183 ns across 25 logic levels, with 68.2% of delay attributed to routing. The design is closed for the stated 75 MHz target; this result is not presented as device Fmax.
+The design is closed for the stated 75 MHz target; the small positive setup
+margin is not presented as device Fmax.
 
-Resource usage is 18.20% LUT, 4.79% FF, 32.00% BRAM, and 4.44% DSP. The post-route power estimate is vectorless and has Medium confidence; it is not measured board power. The report exposes six bonded I/O and therefore does not validate the current ten-port RTL/XDC boundary or a new FreeRTOS board deployment.
+Resource usage is 18.34% LUT, 4.81% FF, 32.00% BRAM, and 4.44% DSP. The
+post-route power estimate is vectorless and has Medium confidence; it is not
+measured board power. The I/O report contains all ten current top-level ports.
 
 Board pin mapping, reset behavior, bring-up sequence, and report provenance are in [fpga.md](docs/fpga.md) and [hardware-validation.md](docs/hardware-validation.md).
 
@@ -184,6 +229,7 @@ make integration
 make assertions
 make baremetal
 make freertos
+make fpga-freertos-images
 make isa
 make benchmark
 make coremark
@@ -227,6 +273,7 @@ docs/            Design, verification, software, performance, and FPGA reports
 | [CoreMark](docs/coremark.md) | Build profile, counters, CRC, interpretation |
 | [FPGA](docs/fpga.md) | Board integration and operational bring-up |
 | [Hardware validation](docs/hardware-validation.md) | Evidence provenance, compatibility, hashes, and claim boundary |
+| [Release checklist](docs/release-checklist.md) | Final clean-build, board-retest, and GitHub publication gates |
 | [Waveform debug](docs/waveform-debug.md) | Trace and waveform workflow |
 
 For a technical review, read Architecture → Pipeline control → Verification → Hardware validation.
@@ -235,7 +282,9 @@ For a technical review, read Architecture → Pipeline control → Verification 
 
 This repository demonstrates an engineering-prototype core and SoC with a routed 75 MHz implementation point. It does **not** claim RISC-V certification, EEMBC certification, production-silicon qualification, measured power, PVT closure, reliability sign-off, or FPGA Fmax.
 
-The latest implementation report and the earlier FreeRTOS board observation are separate evidence snapshots. A clean implementation using the current RTL/XDC and selected firmware must be reported and deployed before they can be presented as one immutable release artifact.
+The current implementation, firmware, and bitstream form one hash-identified
+FreeRTOS release-candidate package. A clean-commit export and deployment of
+that exact final bitstream remain required before it is an immutable release.
 
 ## License
 

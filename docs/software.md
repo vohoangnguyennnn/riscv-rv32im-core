@@ -1,450 +1,402 @@
-# Bare-Metal Software Environment
+# Software Environment and FreeRTOS Port
 
-This document defines the software contract for the RV32IM five-stage core. It
-covers the freestanding runtime, linker layout, trap ABI, completion protocol,
-image generation, simulation flow, and FPGA firmware initialization implemented
-in this repository.
+This document defines the software contract for the RV32IM SoC. Two execution
+profiles share the same CPU, TCM, toolchain, MMIO map, and completion protocol:
 
-The programmer-visible hardware contract is defined in
-[Architecture](architecture.md), pipeline ordering and precise-trap behavior in
-[Pipeline and control](pipeline-control.md), and software verification evidence
-in [Verification](verification.md).
+1. a compact bare-metal runtime for directed tests, benchmarks, CoreMark, and
+   ISA regressions;
+2. a pinned FreeRTOS machine-mode port with a GPIO-blink and UART-echo demo.
 
-## 1. Purpose and scope
+The programmer-visible hardware is defined in
+[Architecture](architecture.md), precise ordering in
+[Pipeline and control](pipeline-control.md), and acceptance evidence in
+[Verification](verification.md). Dated image sizes, simulator observations,
+FPGA deployment status, and artifact hashes are recorded in
+[Hardware validation](hardware-validation.md), not duplicated here.
 
-The software layer has three responsibilities:
+<p align="center">
+  <img
+    src="images/rv32im-core-overview.png"
+    alt="RV32IM FPGA SoC boundary used by bare-metal and FreeRTOS software: core, dual-port TCM, memory demultiplexer, machine timer, UART, and GPIO"
+    width="950"
+  >
+</p>
 
-1. establish a valid ILP32 C execution environment after reset;
-2. provide deterministic trap handling and PASS/FAIL termination for
-   self-checking programs;
-3. convert linked programs into the word-oriented TCM image consumed by
-   simulation and FPGA block-RAM initialization.
+<p align="center"><em>FPGA SoC boundary shared by both software profiles: the
+core, dual-port TCM, memory demultiplexer, machine timer, UART, and GPIO. The
+completion mailbox occupies the last TCM word and is not drawn separately; the
+full memory map is below.</em></p>
 
-It is a compact bare-metal runtime, not an operating system, bootloader, SBI,
-generic board-support package, or hosted C environment. There are no system
-calls, dynamic loader, filesystem, console, heap allocator, scheduler,
-interrupt service framework, or standard C library.
+## 1. Source ownership
 
-### 1.1 Source ownership
-
-| Component | Responsibility |
+| Path | Responsibility |
 |---|---|
-| `sw/Makefile` | Compile, link, inspect, disassemble, and generate 64 KiB TCM images |
-| `sw/link.ld` | Production bare-metal memory map, entry point, stack, and mailbox assertions |
-| `sw/runtime/crt0.S` | Reset entry, `gp`/`sp` initialization, BSS clear, `mtvec`, and `main` call |
-| `sw/runtime/trap.S` | Integer-context save/restore, C trap callback, and `MRET` |
-| `sw/runtime/runtime.c` | Completion API, default trap policy, and minimal memory primitives |
-| `sw/include/baremetal.h` | Public runtime API, status definitions, and CSR helpers |
-| `sw/tests` | Freestanding C programs used for end-to-end validation |
-| `sw/isa` | DUT environment and linker flow for the pinned upstream ISA tests |
-| `tools/bin_to_memh.py` | Dense flat-binary to 32-bit Verilog hex conversion |
-| `tools/elf_to_memh.py` | Validated sparse ELF32 `PT_LOAD` conversion used by ACT4 |
+| `sw/Makefile` | Compile, link, inspect, disassemble, and generate TCM images |
+| `sw/include/baremetal.h` | Bare-metal completion and CSR API |
+| `sw/runtime/` | Bare-metal reset entry, trap wrapper, and memory primitives |
+| `sw/link.ld` | Bare-metal 64 KiB TCM layout |
+| `sw/tests/` | Smoke, trap, and directed benchmark programs |
+| `sw/isa/` | Pinned ISA-test environment, linker script, and image flow |
+| `sw/include/rv32_soc.h` | Timer/UART/GPIO register map and BSP API |
+| `sw/include/freertos_demo.h` | FreeRTOS report and acceptance constants |
+| `sw/bsp/rv32_soc.c` | Stable timer read, safe compare write, UART, and GPIO drivers |
+| `sw/freertos/FreeRTOSConfig.h` | Scheduler, clock, allocation, hook, and port settings |
+| `sw/freertos/startup.S` | FreeRTOS reset entry and trap-vector installation |
+| `sw/freertos/link.ld` | FreeRTOS text, report, stack, and mailbox layout |
+| `sw/freertos/platform.c` | Hooks, diagnostics, report, completion, memory primitives |
+| `sw/freertos/demo.c` | Blink, UART echo, and monitor tasks |
+| `sw/coremark/` | CoreMark platform binding and result mailbox |
+| `third_party/freertos-kernel/` | Unmodified pinned upstream kernel subset |
+| `tools/bin_to_memh.py` | Dense binary to 32-bit Verilog memory conversion |
 
-## 2. Target software profile
+## 2. Common target profile
 
-| Property | Implemented contract |
+| Property | Contract |
 |---|---|
 | ISA string | `rv32im_zicsr` |
-| ABI | `ilp32`, integer calling convention, soft-float ABI |
-| ELF format | ELF32, little-endian, RISC-V `ET_EXEC` |
-| Privilege environment | Single hart, M-mode only |
+| ABI | `ilp32`, integer calling convention, soft float |
+| ELF | ELF32 little-endian RISC-V executable |
+| Hart / privilege | Hart 0, M-mode only |
 | Reset entry | `_start` at `0x0000_0000` |
-| Instruction alignment | 32-bit instructions; no compressed code |
-| Code model | `medlow` |
-| Linking | Static, freestanding, non-PIC, no default startup or libraries |
-| Data alignment policy | Compiler emits strict-alignment accesses |
-| Relaxation policy | Disabled for deterministic addressing and `gp` initialization |
+| Instruction alignment | 32-bit instructions, no RVC |
+| Code model | `medlow`, non-PIC |
+| Stack alignment | 16 bytes at C call boundaries |
+| Linking | Static, freestanding, no default startup or hosted libc |
+| Relaxation | Disabled during compile/link and explicitly around `gp` setup |
 
-The `riscv64-unknown-elf-` tool prefix is intentional: the GNU bare-metal
-toolchain driver supports an RV32 multilib selected by `-march=rv32im_zicsr`
-and `-mabi=ilp32`. `CROSS_COMPILE` can override the prefix, but the selected
-compiler must provide a compatible RV32 ILP32 multilib.
+The `riscv64-unknown-elf-` prefix selects an RV32 multilib through
+`-march=rv32im_zicsr -mabi=ilp32`. `CROSS_COMPILE` can override the prefix.
 
-### 2.1 Calling-convention contract
+Project C sources use `-O2 -Wall -Wextra -Werror`. Upstream FreeRTOS files use
+the same architecture, ABI, freestanding, sectioning, alignment, and
+optimization flags without converting upstream warnings into project-owned
+errors. All link warnings are fatal.
 
-The runtime follows the standard integer calling convention:
-
-- `a0`–`a7` carry arguments; `a0`–`a1` also carry return values;
-- `ra`, `t0`–`t6`, and `a0`–`a7` are caller-saved;
-- `s0`–`s11` are callee-saved;
-- `gp` and `tp` are treated as fixed ABI registers;
-- the stack grows toward lower addresses and remains aligned to 16 bytes at
-  every C procedure boundary.
-
-`_start` initializes `gp` from `__global_pointer$` inside an explicit
-`.option norelax` region. Both compile and link commands also use
-`-mno-relax`, preventing linker relaxation from rewriting the initialization
-sequence before `gp` is valid.
-
-The initial stack pointer is `0x0000_FF00`, which is 16-byte aligned. Trap entry
-allocates a 128-byte frame, so the C trap callback receives the same alignment
-guarantee.
-
-### 2.2 Build policy
-
-Production C files are compiled with optimization and strict diagnostics:
-
-```text
--march=rv32im_zicsr -mabi=ilp32 -mcmodel=medlow
--mstrict-align -mno-relax -ffreestanding -fno-common -fno-pic
--ffunction-sections -fdata-sections -O2 -std=gnu11
--Wall -Wextra -Werror -g3
-```
-
-Linking uses `-nostdlib -nostartfiles -static`, disables the build ID, garbage
-collects unused sections, and treats linker warnings as fatal. Source code must
-therefore not assume libc, libgcc helper routines, C++ constructors, TLS, or
-hosted-process startup unless the required implementation is added explicitly.
-
-## 3. Build and image flow
-
-The normal firmware path is:
-
-```text
- C / assembly
-      |
-      v
- RV32 objects + crt0 + trap entry + runtime
-      |
-      v
- ELF32 executable -----> link map
-      |                  disassembly
-      v
- flat little-endian binary
-      |
-      v
- 16,384 x 32-bit Verilog hex words
-      |
-      +------> simulation TCM preload
-      +------> FPGA BRAM initialization
-```
-
-Run the default software build with:
-
-```sh
-make -C sw all
-```
-
-By default, generated files are placed below
-`/tmp/rv32im-core-software-<uid>/`. The root build uses the same external
-directory through `make software-images`, so build products do not pollute the
-repository.
-
-### 3.1 Generated artifacts
+Generated products are placed below `/tmp/rv32im-core-software-<uid>/`:
 
 | Artifact | Purpose |
 |---|---|
-| `NAME.elf` | ELF32 executable with entry point `0x0000_0000` |
-| `NAME.map` | Linker placement, symbol ownership, and section-size audit |
-| `NAME.dump` | Source-interleaved disassembly using canonical, non-alias mnemonics |
+| `NAME.elf` | Debuggable ELF32 executable |
+| `NAME.map` | Section placement and symbol audit |
+| `NAME.dump` | Source-interleaved canonical disassembly |
 | `NAME.bin` | Flat little-endian load image |
-| `NAME.mem` | Dense 64 KiB, word-oriented Verilog hex image |
+| `NAME.mem` | Exactly 16,384 word-oriented lines for the 64 KiB TCM |
 
-`sw/Makefile` verifies that each executable is ELF32. The linker script checks
-all fixed placement and range constraints. `bin_to_memh.py` rejects an invalid
-TCM size or an oversized binary, zero-pads the remaining capacity, converts
-each little-endian group of four bytes into one eight-digit hex word, and emits
-exactly 16,384 words for the default 64 KiB TCM.
+## 3. SoC BSP and MMIO contract
 
-The ACT4 path is intentionally different. `elf_to_memh.py` validates ELF32,
-little-endian encoding, `EM_RISCV`, `ET_EXEC`, entry address, `PT_LOAD` bounds,
-and equal virtual/physical addresses, then emits a sparse word-addressed image
-for the simulation-only 1 MiB TCM.
+The core data port reaches TCM, timer, UART, and GPIO through the same blocking
+request/response protocol. A C volatile load/store therefore waits until the
+selected peripheral accepts and completes the request.
+
+The complete address-space diagram is provided in
+[Architecture §6.3](architecture.md#63-dual-port-tcm-and-soc-fabric); the tables
+below define the software-visible registers and access semantics.
+
+### 3.1 Machine timer
+
+| Address | Register | Access |
+|---:|---|---|
+| `0x0200_4000` | `mtimecmp[31:0]` | RW |
+| `0x0200_4004` | `mtimecmp[63:32]` | RW |
+| `0x0200_BFF8` | `mtime[31:0]` | RW |
+| `0x0200_BFFC` | `mtime[63:32]` | RW |
+
+`rv32_soc_mtime_read()` performs `high → low → high` reads and retries across a
+low-word rollover. `rv32_soc_mtimecmp_write()` uses the RV32-safe sequence:
+
+```text
+mtimecmp.low  = 0xffff_ffff
+mtimecmp.high = new_high
+mtimecmp.low  = new_low
+```
+
+This prevents an intermediate compare value from falling below the live
+`mtime`. MTIP is a level: software deasserts it by moving `mtimecmp` into the
+future, not by writing `mip`.
+
+### 3.2 UART
+
+| Offset | Register | Behavior |
+|---:|---|---|
+| `+0x00` | `TXDATA` | Store low byte; backpressured while TX busy |
+| `+0x04` | `RXDATA` | Read low byte and pop; bit 31 means empty |
+| `+0x08` | `STATUS` | TX ready/busy, RX valid, sticky overrun/frame error |
+| `+0x0C` | `BAUDDIV` | Read-only clocks per serial bit |
+
+Base address is `0x1000_0000`; the default serial format is 115200-baud 8N1.
+RX has one buffered byte; a second completed frame before software pops it sets
+overrun.
+Writing ones to status bits 3/4 clears overrun/frame-error flags. The BSP uses
+blocking `rv32_soc_uart_putc()` and non-blocking `rv32_soc_uart_try_getc()`.
+
+### 3.3 GPIO
+
+| Offset | Register | Behavior |
+|---:|---|---|
+| `+0x00` | `INPUT` | Two-flop synchronized pins, read-only |
+| `+0x04` | `OUTPUT` | Output data latch |
+| `+0x08` | `OUTPUT_ENABLE` | One bit per driven output |
+| `+0x0C` | `OUTPUT_SET` | Atomic set |
+| `+0x10` | `OUTPUT_CLEAR` | Atomic clear |
+| `+0x14` | `OUTPUT_TOGGLE` | Atomic toggle |
+
+Base address is `0x1001_0000`. Byte strobes are honored for data, enable,
+set, clear, and toggle writes.
+
+UART and GPIO are project-defined peripherals. Their layout is an SoC ABI, not
+part of the RISC-V ISA.
 
 ## 4. Memory and linker contract
 
-The production runtime and FPGA image use one unified 64 KiB TCM:
+### 4.1 Bare-metal startup and trap ABI
 
-| Address range | Linker ownership | Purpose |
-|---|---|---|
-| `0x0000_0000–0x0000_00FF` | `.init` | Reset entry and early startup; limited to 256 bytes |
-| `0x0000_0100–0x0000_03FF` | `.trap` | Direct-mode trap entry; must end before application text |
-| `0x0000_0400–__image_end` | `.text`, `.rodata`, `.data`, `.sdata`, `.bss` | Application and runtime image |
-| `0x0000_EF00–0x0000_FEFF` | Reserved stack | 4 KiB downward-growing stack |
-| `0x0000_FF00–0x0000_FFFB` | Unused | Separation between stack top and mailbox |
-| `0x0000_FFFC–0x0000_FFFF` | `.tohost` | One 32-bit completion mailbox |
+`sw/runtime/crt0.S` performs:
 
-The linker fails when:
+1. `gp = __global_pointer$` with relaxation disabled;
+2. `sp = 0x0000_FF00`;
+3. zeroing of `.bss`;
+4. direct-mode `mtvec = trap_entry`;
+5. `main()` call followed by `bm_exit()`.
 
-- startup exceeds the space below the trap vector;
-- trap entry overlaps application text;
-- the linked image reaches the reserved stack;
-- `.tohost` is not exactly one 32-bit word.
-
-Text and writable data have distinct ELF `PT_LOAD` permissions, but both map
-to the same physical TCM with identical virtual and load addresses. Initialized
-`.data` bytes are already present in the memory image, so startup does not copy
-them from a separate ROM load address. `.bss` is `NOLOAD` and is explicitly
-cleared by `_start`.
-
-The memory map is part of the hardware/software interface. Changing TCM base,
-capacity, reset vector, trap vector, stack, or mailbox address requires a
-coordinated update to the linker script, runtime headers, SoC/FPGA parameters,
-test harness, ISA environment, and documentation.
-
-## 5. Reset and C startup
-
-After the hardware releases its synchronous reset, execution begins at
-`_start`:
-
-1. load `gp = __global_pointer$` with relaxation disabled;
-2. load `sp = __stack_top`;
-3. clear every word in `[__bss_start, __bss_end)`;
-4. install `trap_entry` in direct-mode `mtvec`;
-5. call `int main(void)` using the ILP32 calling convention;
-6. tail-call `bm_exit(main_return_value)`.
-
-Returning zero from `main` reports PASS. Any nonzero return value becomes a
-failure code. Startup does not initialize general-purpose registers beyond
-those required by the ABI; the architecture does not define reset values for
-`x1`–`x31`.
-
-The TCM array itself is never reset. In simulation, the harness clears and
-reloads it before every program. On FPGA, firmware is restored by configuring
-or reloading the initialized BRAM image, not by asserting the CPU reset. A
-runtime reset therefore preserves any data or code that software previously
-modified in TCM.
-
-## 6. Trap runtime contract
-
-`trap_entry` is linked at `0x0000_0100` and installed into `mtvec` during
-startup. It provides a project-specific bridge from the hardware trap packet to
-C:
+`trap_entry` uses a 128-byte aligned frame, preserves the integer register
+context, passes `mcause`, `mepc`, and `mtval` to:
 
 ```c
 void bm_trap_handler(uint32_t cause, uint32_t epc, uint32_t tval);
 ```
 
-The assembly wrapper:
+and executes `MRET` after the callback returns. The weak callback treats every
+trap as unexpected. `trap.c` overrides it, validates ECALL/EBREAK/illegal
+instruction state, advances `mepc` by four for the fixed-width instruction,
+and returns.
 
-1. allocates a 128-byte, 16-byte-aligned frame;
-2. saves every integer register except immutable `x0` and the current `sp`;
-3. reads `mcause`, `mepc`, and `mtval` into `a0`, `a1`, and `a2`;
-4. calls `bm_trap_handler`;
-5. restores the saved integer context and stack pointer;
-6. executes `MRET`.
+### 4.2 TCM and linker layout
 
-The weak default handler treats every trap as unexpected and reports a failure
-derived from the low five cause bits. A program expecting a synchronous trap
-overrides the handler, validates its arguments, updates `mepc` when execution
-should resume, and returns to the wrapper.
+Both linker scripts use the same 64 KiB TCM partition and fixed reset, trap,
+report, stack, and completion boundaries:
 
-For the fixed-width baseline, advancing past one faulting instruction normally
-uses `mepc + 4`; the handler remains responsible for deciding whether that is
-correct for the specific cause. The wrapper does not implement nested traps,
-interrupt masking, privilege transitions, or an `mstatus` stack because those
-features do not exist in the current architecture.
-
-Precise exception priority, implemented cause values, and `mtval` policy are
-defined in [Architecture](architecture.md#7-synchronous-exceptions-and-precise-traps).
-
-## 7. Runtime API and completion protocol
-
-### 7.1 Public API
-
-| Interface | Behavior |
-|---|---|
-| `BM_CHECK(condition, code)` | Report `code` and stop when the condition is false |
-| `bm_pass()` | Write PASS status and remain in a `nop` loop |
-| `bm_fail(code)` | Encode a nonzero failure status and remain in a `nop` loop |
-| `bm_exit(status)` | Map return value zero to PASS and nonzero to failure |
-| `bm_trap_handler(cause, epc, tval)` | Weak trap callback overridden by trap-aware programs |
-| `bm_csr_read_misa()` | Read the implemented ISA-identification CSR |
-| `bm_csr_read_mhartid()` | Read the single-hart ID |
-| `bm_csr_write_mepc(value)` | Select the resume PC used by `MRET` |
-| `memcpy`, `memset`, `memcmp` | Minimal byte-oriented freestanding implementations |
-
-The memory primitives exist so compiler-generated code can resolve common
-freestanding operations without libc. They are functional reference routines,
-not optimized processor-library implementations.
-
-### 7.2 Mailbox encoding
-
-The production mailbox is the final TCM word at `0x0000_FFFC`:
-
-| Stored value | Meaning |
-|---:|---|
-| `1` | PASS |
-| `(code << 1) | 1` | FAIL with the original code recoverable by shifting right |
-| `3` | FAIL when the caller supplied code zero, avoiding collision with PASS |
-
-`bm_pass` and `bm_fail` issue `fence rw, rw` after the store. In the current
-single-hart, uncached, blocking memory system, `FENCE` is a legal ordering no-op;
-the compiler `memory` clobber also prevents reordering around the inline
-assembly boundary.
-
-Simulation and `soc_tcm_top` recognize only a non-trapping, retired, aligned
-full-word store to the configured mailbox address. The first valid completion
-is latched until reset. Wrong-path, misaligned, faulting, or byte/halfword
-stores cannot report a false result.
-
-## 8. Included bare-metal programs
-
-| Program | End-to-end purpose | Current result |
+| Range | Bare-metal use | FreeRTOS use |
 |---|---|---|
-| `smoke.c` | Stack alignment, initialized data, BSS, function calls, little-endian byte access, word access, MUL, signed/unsigned DIV/REM, `misa`, and `mhartid` | PASS: 451 cycles, 171 retirement events, 0 traps |
-| `trap.c` | ECALL, EBREAK, illegal instruction, `mcause/mepc/mtval`, C handler override, `mepc + 4`, and three `MRET` recoveries | PASS: 838 cycles, 346 retirement events, 3 traps |
+| `0x0000_0000–0x0000_00FF` | Reset startup | Reset startup |
+| `0x0000_0100–0x0000_03FF` | Trap wrapper reservation | Aligned official trap-handler reservation |
+| `0x0000_0400–__image_end` | Runtime and application | Kernel, port, BSP, application, static TCBs/stacks |
+| `0x0000_E000–0x0000_E0FF` | Optional CoreMark report | 64-byte report at `0x0000_E000–0x0000_E03F` |
+| `0x0000_EF00–0x0000_FEFF` | 4 KiB application stack | Pre-scheduler C stack reservation |
+| `0x0000_FFFC` | `tohost` completion word | `tohost` completion word |
 
-These programs validate the runtime and compiler-generated execution path.
-They do not replace the unit, pipeline, ISA, or ACT4 regressions described in
-[Verification](verification.md).
+Code and initialized data have identical load and execution addresses. Startup
+therefore clears BSS but performs no ROM-to-RAM copy. Linker assertions reject
+startup/trap overlap, image/report/stack overlap, a non-64-byte FreeRTOS
+report, or an incorrectly sized mailbox.
 
-## 9. ISA-test software environments
+### 4.3 Completion protocol
 
-### 9.1 Pinned `riscv-tests`
+`bm_pass()` and the FreeRTOS monitor store one to `0x0000_FFFC` for PASS.
+`bm_fail(code)` and `freertos_platform_fail(code)` encode a non-one odd failure
+status. `soc_tcm_top` accepts completion only from a non-trapping, retired,
+aligned full-word store; speculative, faulting, killed, or partial stores
+cannot report completion.
 
-`sw/isa` reuses the common RTL harness but does not link the production C
-runtime. Its `riscv_test.h` adapter:
+The included software tests are:
 
-- starts at `_start = 0x0000_0000`;
-- executes the unprivileged instruction tests in the core's M-mode-only
-  environment without a proxy kernel or SBI;
-- installs an unexpected-trap handler;
-- maps the upstream subtest number in `gp` to an odd failure status;
-- writes PASS/FAIL to `0x0000_FFFC`.
+| Program | Coverage |
+|---|---|
+| `smoke` | Startup, ABI, stack/data/BSS, calls, memory, RV32M, ID CSRs |
+| `trap` | ECALL, EBREAK, illegal instruction, trap CSRs, three `MRET` returns |
 
-The ISA linker reserves the final TCM word and checks `_start`, ELF32 format,
-image bounds, and the exact `tohost` symbol address. The manifest includes 40
-RV32I and all 8 RV32M programs. `fence_i` and `ma_data` remain explicit scope
-exclusions for the reasons recorded in [Verification](verification.md#72-pinned-riscv-tests).
+## 5. FreeRTOS profile
 
-### 9.2 ACT4
+### 5.1 Upstream provenance
 
-ACT4 uses its own DUT macros, linker script, Sail-generated expected
-signatures, and a simulation-only 1 MiB TCM with mailbox `0x000F_FFFC`.
-`elf_to_memh.py` loads its `PT_LOAD` segments directly rather than flattening
-the larger sparse address space. This environment validates the I/M claim but
-is not the production firmware memory map; configuration and results are
-documented in [Verification](verification.md#73-act4-with-sail).
+The repository vendors the minimum required subset of official
+[FreeRTOS Kernel V11.3.0](https://github.com/FreeRTOS/FreeRTOS-Kernel/releases/tag/V11.3.0)
+at commit:
 
-## 10. Running and debugging software
-
-### 10.1 Build and execute
-
-```sh
-make software-images       # Build smoke.mem and trap.mem
-make baremetal             # Build and execute both programs
-make baremetal-smoke       # Execute one production-runtime program
-make baremetal-trap
-make isa                   # Execute 40 RV32I + 8 RV32M programs
-make test                  # Required lint/RTL/software/ISA regression
+```text
+9b777ae5c5b8e9e456065a00294d1e5f5f9facf5
 ```
 
-List production programs or build one image directly:
+Imported `tasks.c`, `list.c`, public headers, and the GCC RISC-V port remain
+unmodified. `third_party/freertos-kernel/UPSTREAM.md` records provenance and
+`SOURCE.sha256` protects every imported file. Project-specific configuration
+and chip macros remain under `sw/freertos/`.
+
+Run the integrity check independently with:
 
 ```sh
-make -C sw list
-make -C sw BUILD_DIR=/tmp/rv32im-sw /tmp/rv32im-sw/smoke.mem
+make -C sw freertos-check
 ```
 
-The second command demonstrates an explicit output directory; the default
-`make software-images` target selects a per-user `/tmp` directory automatically.
+### 5.2 Scheduler configuration
 
-### 10.2 Retirement trace
+| Setting | Value |
+|---|---:|
+| Kernel | FreeRTOS V11.3.0 |
+| Scheduling | Preemptive, time slicing enabled |
+| Tick | 1 kHz |
+| Timer clock | 75 MHz by default |
+| Priorities | 4 |
+| Allocation | Static task/TCB memory only |
+| Idle stack | 128 words |
+| ISR stack | 192 words, statically allocated |
+| Software timers | Disabled |
+| FPU / vector context | Disabled |
+| Tickless idle | Disabled |
+| Stack checking | Level 2 |
+
+`FREERTOS_CPU_CLOCK_HZ` can override the default at build time. It must match
+the clock that advances `mtime`; otherwise the kernel tick period is wrong.
+
+The custom RISC-V extension header declares `portasmHAS_MTIME=1`, no SiFive
+full-CLINT dependency, no FPU/VPU, and no implementation-specific registers.
+The official port saves/restores the standard integer context, per-task
+critical nesting, `mstatus`, and `mepc`; `gp` and `tp` remain fixed as required
+by the port assumption.
+
+### 5.3 Startup and trap flow
+
+`sw/freertos/startup.S` disables `mstatus.MIE` and `mie`, initializes `gp/sp`,
+clears BSS, installs `freertos_risc_v_trap_handler` in direct `mtvec`, and calls
+`main`.
+
+Scheduler start then:
+
+1. reads stable `mtime`;
+2. sets the first `mtimecmp` deadline;
+3. enables `mie.MTIE`;
+4. restores the first task with global interrupts enabled.
+
+On machine-timer interrupt, hardware records the interrupted instruction PC,
+sets `mcause=0x8000_0007`, performs the MIE/MPIE trap transition, and redirects
+to the FreeRTOS handler. The handler saves the task context, switches to the
+dedicated ISR stack, safely advances `mtimecmp`, increments the kernel tick,
+optionally selects another task, restores context, and executes `MRET`.
+
+FreeRTOS uses M-mode ECALL for a synchronous yield. The handler advances this
+ECALL `mepc` by four before scheduling. An MTIP trap preserves the original
+`mepc`, so the interrupted instruction boundary resumes precisely.
+
+Unexpected exceptions, unexpected non-MTIP interrupts, `configASSERT`, task
+return, or stack overflow populate diagnostics and terminate with a failing
+mailbox status instead of spinning silently in an upstream weak handler.
+
+### 5.4 Demo tasks
+
+| Task | Priority | Stack | Behavior |
+|---|---:|---:|---|
+| `check` | 3 | 192 words | Validates progress, writes report, reports PASS |
+| `echo` | 2 | 192 words | Sends `READY\n`, polls RX, echoes one byte |
+| `blink` | 1 | 160 words | Toggles GPIO0 every `FREERTOS_BLINK_PERIOD_MS` (2 ms by default) |
+| idle | 0 | 128 words | Kernel idle task |
+
+The monitor accepts completion only after at least three blinks, one echo, four
+tick-hook calls, and eight task-switch trace events.
+
+### 5.5 Report ABI
+
+The 16-word structure at `0x0000_E000` is cleared on every application start:
+
+| Word | Field |
+|---:|---|
+| 0 | Magic `0x4652544F` (`FRTO`) |
+| 1 | Kernel encoding `0x000B0300` |
+| 2 | Kernel tick count |
+| 3 | Application tick-hook count |
+| 4 | Task switch-in count |
+| 5 | Blink count |
+| 6 | Echo count |
+| 7 | Echoed byte |
+| 8 | GPIO output latch |
+| 9 | `mstatus` snapshot |
+| 10 | `mie` snapshot |
+| 11–13 | Unexpected `mcause/mepc/mtval` diagnostics |
+| 14 | Failure code; zero on success |
+| 15 | Reserved |
+
+## 6. Build and run
 
 ```sh
-make baremetal-smoke \
-  BAREMETAL_PLUSARGS='+trace=/tmp/smoke.csv +max_cycles=300000'
+# Bare-metal images and disassembly
+make -C sw baremetal-images
+
+# FreeRTOS image and source-integrity check
+make -C sw freertos-images
+
+# End-to-end FreeRTOS on Verilator
+make freertos
+
+# Same image on Questa
+make questa-freertos-run
+
+# Frozen 75 MHz board image with a human-visible 250 ms blink period
+make fpga-freertos-images
+
+# Everything in the public CI gate
+make -j"$(nproc)" test
 ```
 
-Supported harness arguments are:
+<p align="center">
+  <a href="images/firmware-rtos.png">
+    <img src="images/firmware-rtos.png" alt="FreeRTOS FPGA firmware compilation memory-image size and SHA-256 identities" width="850">
+  </a>
+</p>
 
-| Plusarg | Meaning | Default |
-|---|---|---:|
-| `+mem=FILE` | Required word-oriented memory image | none |
-| `+test=NAME` | Name printed in diagnostics | `baremetal` |
-| `+trace=FILE` | Optional full retirement CSV | disabled |
-| `+max_cycles=N` | Cycle timeout | 200,000 |
-| `+max_trace_events=N` | Retirement-event timeout | 100,000 |
+<p align="center"><em>The frozen board profile compiles the upstream port and
+project BSP, emits the 16,384-word TCM image, and records ELF/MEM identities
+before Vivado consumes the image.</em></p>
 
-On failure or timeout, the harness prints the most recent 256 architectural
-events. Use the failing PC to inspect `NAME.dump` before opening a waveform.
+Frozen simulator results are recorded in
+[Hardware validation §3](hardware-validation.md#3-functional-and-architectural-evidence);
+the image footprint and hashes are recorded in
+[§7](hardware-validation.md#7-artifact-identity).
 
-### 10.3 Questa debug
+## 7. FPGA firmware contract
 
-```sh
-make questa-baremetal-gui PROGRAM=smoke
-make questa-baremetal-gui PROGRAM=trap
-make questa-isa-gui ISA_TEST=rv32um-div
-```
+The FPGA TCM is initialized from a generated `.mem` image. `.data` already has
+identical load and virtual addresses, so startup performs no ROM-to-RAM copy.
+The TCM array is not reset; asserting CPU reset preserves its contents.
 
-The retirement trace remains the architectural oracle; the waveform is used to
-explain stage occupancy, forwarding, wait, redirect, and trap timing.
+The current Vivado release-candidate package selects `freertos_demo.mem`, and
+`FREERTOS_CPU_CLOCK_HZ` matches the 75 MHz clock that advances `mtime`. The
+regression image uses the 2 ms blink default; the board image uses
+`FREERTOS_BLINK_PERIOD_MS=250` so GPIO activity is human-observable. This
+changes only the demo delay, not the 1 kHz kernel tick. Firmware ELF, memory
+image, map, disassembly, and bitstream are paired by SHA-256 in the hardware
+validation record.
 
-## 11. FPGA firmware initialization
+The board wrapper exposes CH340 UART RX/TX on U2/V2, GPIO bit 0 on N17,
+active-low heartbeat/PASS LEDs on M18/N18, and active-high FAIL/DONE on
+W21/W22.
 
-Generate an image in a convenient project-local build directory:
+<p align="center">
+  <a href="images/uart-terminal.png">
+    <img src="images/uart-terminal.png" alt="FreeRTOS READY output and echoed character on the physical CH340 UART" width="520">
+  </a>
+</p>
 
-```sh
-make -C sw BUILD_DIR=../build/software all
-```
+<p align="center"><em>Board UART at 115200 8N1 shows repeatable `READY`
+output after reset and a character returned by the polling echo task.</em></p>
 
-Add the selected `.mem` file to the Vivado project and set the `fpga_top`
-parameter `TCM_INIT_FILE` to its synthesis-visible path. The constant
-`$readmemh` image is mapped into BRAM initialization attributes; the CPU begins
-fetching it from address zero after reset release.
+The exact deployment result is owned by
+[Hardware validation §6](hardware-validation.md#6-io-and-physical-board-validation),
+and image/bitstream identity by
+[§7](hardware-validation.md#7-artifact-identity).
+Changing the firmware image, SoC clock, wrapper, XDC, target part, or Vivado
+strategy requires a new implementation and hardware-validation record. The
+current package was exported from a dirty worktree; the public release must be
+regenerated from the final clean commit and its exact bitstream retested.
 
-The firmware-visible mailbox address must equal `TEST_STATUS_ADDR`, and PASS
-value `1` must equal `TEST_PASS_VALUE`. On the A7-Lite wrapper, a valid mailbox
-store stops the heartbeat and drives sticky PASS/FAIL/DONE status. Record the
-board revision, bitstream hash, firmware ELF or `.mem` hash, and observed status
-when publishing hardware evidence. See
-[FPGA implementation](fpga.md).
+## 8. Explicit limitations
 
-## 12. Adding a program
+This software environment does not claim:
 
-1. Add `sw/tests/NAME.c` or `sw/tests/NAME.S` and provide `int main(void)`.
-2. Include `baremetal.h`; return zero, return a stable nonzero failure code, or
-   use `BM_CHECK`/`bm_fail`.
-3. Override `bm_trap_handler` only when the program deliberately expects traps.
-4. Add `NAME` to `BAREMETAL_PROGRAMS` in `sw/tests/programs.mk`.
-5. Run `make baremetal-NAME` and inspect `NAME.map` and `NAME.dump`.
-6. Run `make test`; run `make act4` as well when architectural RTL changed.
-7. For FPGA use, rebuild the `.mem`, regenerate the bitstream, and record the
-   exact firmware/bitstream pairing.
+- an SBI, U/S-mode port, virtual memory, PMP, process isolation, or userspace;
+- software/external interrupts, a PLIC, nested-interrupt support, or UART/GPIO
+  interrupt-driven drivers;
+- libc/POSIX, filesystem, network stack, shell, bootloader, secure boot, or
+  firmware-update infrastructure;
+- dynamic FreeRTOS allocation or production worst-case stack proof;
+- official FreeRTOS certification or full privileged-architecture compliance.
 
-Use stable, unique failure codes so a mailbox value maps directly to one source
-check. Do not rely on uninitialized GPRs, TCM contents outside linked sections,
-misaligned accesses, unsupported CSRs, `FENCE.I`, self-modifying code, or
-features outside `rv32im_zicsr`.
-
-## 13. Software boundaries and future work
-
-The current environment intentionally does not provide:
-
-- a ROM-to-RAM copy stage, external DDR initialization, or execute-in-place
-  flash flow;
-- interrupts, timers, nested traps, privilege transitions, SBI, or an OS ABI;
-- UART/semihosting output, command-line arguments, environment variables, or a
-  filesystem;
-- libc, libm, libgcc integration, heap allocation, C++, TLS, atomics, or
-  multithreading;
-- cache maintenance, `FENCE.I`, dynamic code loading, or self-modifying code;
-- secure boot, image authentication, firmware update, or persistent storage.
-
-A future platform layer should add these as explicit hardware/software
-contracts rather than silently extending this verification runtime. In
-particular, external memory requires a boot/copy policy, interrupts require the
-missing machine CSRs and context rules, and caches require instruction/data
-coherence plus Zifencei behavior.
-
-## 14. Release checklist for software
-
-Before publishing a release:
-
-1. build from a clean checkout with the documented GNU RISC-V toolchain;
-2. verify ELF32, little-endian format, entry point, memory map, stack range, and
-   mailbox symbol in the ELF/map output;
-3. run `make test` and the applicable ACT4 regression;
-4. keep generated ELF, binary, map, dump, and `.mem` files out of Git unless a
-   release policy explicitly identifies an artifact;
-5. record tool versions and hash every firmware image used for FPGA evidence;
-6. keep README, architecture, verification, FPGA, and software claims aligned.
-
-## 15. References
-
-- [RISC-V ELF psABI Specification](https://riscv-non-isa.github.io/riscv-elf-psabi-doc/)
-- [RV32I Base Integer Instruction Set, Version 2.1](https://docs.riscv.org/reference/isa/v20260120/unpriv/rv32.html)
-- [M Extension for Integer Multiplication and Division, Version 2.0](https://docs.riscv.org/reference/isa/v20260120/unpriv/m-st-ext.html)
-- [Zicsr Extension for CSR Instructions, Version 2.0](https://docs.riscv.org/reference/isa/v20260120/unpriv/zicsr.html)
-- [Machine-Level ISA, Version 1.13](https://docs.riscv.org/reference/isa/v20260120/priv/machine.html)
+The implemented claim is a reproducible M-mode FreeRTOS bring-up using the
+official RISC-V port on this documented single-MTIP SoC.
