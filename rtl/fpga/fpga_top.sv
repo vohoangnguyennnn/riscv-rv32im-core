@@ -17,6 +17,10 @@ module fpga_top #(
 ) (
   input  logic clk_50m_i,
   input  logic reset_ni,
+  input  logic user_reset_ni,
+  input  logic uart_rx_i,
+  output logic uart_tx_o,
+  output logic gpio_led_o,
   output logic led1_n_o,
   output logic led2_n_o,
   output logic fail_o,
@@ -32,6 +36,9 @@ module fpga_top #(
   logic test_fail;
   logic [HEARTBEAT_WIDTH-1:0] heartbeat_q;
   logic heartbeat;
+  logic uart_tx;
+  logic [31:0] gpio_out;
+  logic [31:0] gpio_oe;
 
   clk_wiz_0 u_clk_wiz (
     .clk_in1  (clk_50m_i),
@@ -40,7 +47,9 @@ module fpga_top #(
     .locked   (clk_locked)
   );
 
-  assign clock_reset_ni = reset_ni && clk_locked;
+  // K3 resets the clocking boundary; K1 resets only the synchronous SoC so the
+  // status outputs remain observably reset while the user button is held.
+  assign clock_reset_ni = reset_ni && user_reset_ni && clk_locked;
 
   reset_sync #(
     .STAGES (RESET_SYNC_STAGES)
@@ -67,7 +76,7 @@ module fpga_top #(
     fail_o    = 1'b0;
     done_o    = 1'b0;
 
-    if (!soc_rst) begin
+    if (reset_ni && user_reset_ni && clk_locked && !soc_rst) begin
       heartbeat = heartbeat_q[HEARTBEAT_WIDTH-1] && !test_done;
       led1_n_o  = ~heartbeat;
       led2_n_o  = ~test_pass;
@@ -75,6 +84,12 @@ module fpga_top #(
       done_o    =  test_done;
     end
   end
+
+  // Hold external peripherals benign throughout either reset source or loss of
+  // clock lock, even while the generated SoC clock is not toggling.
+  assign uart_tx_o  = (reset_ni && user_reset_ni && clk_locked) ? uart_tx : 1'b1;
+  assign gpio_led_o = reset_ni && user_reset_ni && clk_locked && !soc_rst
+                    && gpio_oe[0] && gpio_out[0];
 
   soc_tcm_top #(
     .RESET_VECTOR      (RESET_VECTOR),
@@ -88,13 +103,11 @@ module fpga_top #(
   ) u_soc (
     .clk_i              (clk_75m),
     .rst_i              (soc_rst),
-    // UART/GPIO pins are unassigned on this wrapper; keep inputs benign while
-    // soc_tcm_top retains the full I/O contract for future board mappings.
-    .uart_rx_i          (1'b1),
-    .uart_tx_o          (),
+    .uart_rx_i          (uart_rx_i),
+    .uart_tx_o          (uart_tx),
     .gpio_in_i          (32'b0),
-    .gpio_out_o         (),
-    .gpio_oe_o          (),
+    .gpio_out_o         (gpio_out),
+    .gpio_oe_o          (gpio_oe),
     .test_done_o        (test_done),
     .test_pass_o        (test_pass),
     .test_fail_o        (test_fail),
