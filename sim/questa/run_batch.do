@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 
 # Non-interactive companion to the curated GUI waveform flow. Any assertion,
 # $fatal, or simulator error must make the Make target fail.

@@ -1,4 +1,3 @@
-# SPDX-License-Identifier: MIT
 
 # Shared, intentionally small GUI policy. Signal selection stays in each
 # test-specific file so every screenshot has an explicit verification purpose.
