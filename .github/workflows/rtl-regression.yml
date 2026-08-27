@@ -61,11 +61,11 @@ jobs:
             ISA_TRACE_DIR="${RUNNER_TEMP}/isa-traces" \
             test
 
-      - name: Upload ISA failure diagnostics
+      - name: Upload software and ISA failure diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: isa-failure-diagnostics
+          name: rtl-software-failure-diagnostics
           if-no-files-found: ignore
           retention-days: 14
           path: |
@@ -73,3 +73,6 @@ jobs:
             /tmp/rv32im-core-isa-*/*.elf
             /tmp/rv32im-core-isa-*/*.map
             /tmp/rv32im-core-isa-*/*.dump
+            /tmp/rv32im-core-software-*/*.elf
+            /tmp/rv32im-core-software-*/*.map
+            /tmp/rv32im-core-software-*/*.dump
