@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 module tb_csr_core;
 
@@ -11,6 +10,7 @@ module tb_csr_core;
 
   logic clk;
   logic rst;
+  logic mtip;
 
   rv32_mem_if imem();
   rv32_mem_if dmem();
@@ -26,6 +26,7 @@ module tb_csr_core;
   logic [31:0] trace_mem_wdata;
   logic        trace_trap;
   logic [4:0]  trace_cause;
+  logic        trace_is_interrupt;
   logic        trace_control;
   logic        trace_taken;
   logic [31:0] trace_target;
@@ -40,6 +41,7 @@ module tb_csr_core;
   rv32_core dut (
     .clk_i              (clk),
     .rst_i              (rst),
+    .mtip_i             (mtip),
     .imem_m             (imem),
     .dmem_m             (dmem),
     .trace_valid_o      (trace_valid),
@@ -53,9 +55,18 @@ module tb_csr_core;
     .trace_mem_wdata_o  (trace_mem_wdata),
     .trace_trap_o       (trace_trap),
     .trace_cause_o      (trace_cause),
+    .trace_is_interrupt_o (trace_is_interrupt),
     .trace_control_o    (trace_control),
     .trace_taken_o      (trace_taken),
-    .trace_target_o     (trace_target)
+    .trace_target_o     (trace_target),
+    .perf_cycle_o          (),
+    .perf_instret_o        (),
+    .perf_load_use_stall_o (),
+    .perf_csr_stall_o      (),
+    .perf_mdu_stall_o      (),
+    .perf_mem_stall_o      (),
+    .perf_redirect_o       (),
+    .perf_squash_o         ()
   );
 
   rv32_tcm #(
@@ -147,6 +158,7 @@ module tb_csr_core;
 
     clk                = 1'b0;
     rst                = 1'b1;
+    mtip               = 1'b1;
     cycles             = 0;
     trap_count         = 0;
     csr_result_count   = 0;
@@ -175,9 +187,10 @@ module tb_csr_core;
     u_tcm.mem[13] = encode_csr(CSR_MTVAL, FUNCT3_CSRRS, 5'd11, 5'd0);
     u_tcm.mem[14] = encode_csr(CSR_MEPC, FUNCT3_CSRRS, 5'd12, 5'd0);
     u_tcm.mem[15] = encode_csr(CSR_MINSTRET, FUNCT3_CSRRS, 5'd15, 5'd0);
-    u_tcm.mem[16] = encode_addi(5'd13, 5'd0, 12'h044);
-    u_tcm.mem[17] = encode_sw(5'd13, 12'h0c4);
-    u_tcm.mem[18] = 32'h0000_006f; // jal x0, 0
+    u_tcm.mem[16] = encode_csr(CSR_MIP, FUNCT3_CSRRS, 5'd16, 5'd0);
+    u_tcm.mem[17] = encode_addi(5'd13, 5'd0, 12'h044);
+    u_tcm.mem[18] = encode_sw(5'd13, 12'h0c4);
+    u_tcm.mem[19] = 32'h0000_006f; // jal x0, 0
 
     // Software-selected direct-mode trap vector at 0x120.
     u_tcm.mem[72] = encode_csr(CSR_MCAUSE, FUNCT3_CSRRS, 5'd20, 5'd0);
@@ -218,6 +231,11 @@ module tb_csr_core;
               trace_rd_we
             );
           end
+          check_word(
+            dut.u_csr_file.mstatus_q,
+            MSTATUS_MPP_M_VALUE,
+            "trap-entry mstatus side effects"
+          );
           trap_count++;
         end
 
@@ -232,10 +250,20 @@ module tb_csr_core;
           32'h0000_0120: check_csr_result(5'd20, 32'h0000_0002, "handler mcause");
           32'h0000_0124: check_csr_result(5'd21, 32'h0000_0028, "handler mepc");
           32'h0000_0128: check_csr_result(5'd22, illegal_csr_insn, "handler mtval");
-          32'h0000_0030: check_csr_result(5'd10, 32'h0000_0002, "returned mcause");
+          32'h0000_0030: begin
+            check_csr_result(5'd10, 32'h0000_0002, "returned mcause");
+            // CSR state commits from the previous MEM/WB packet at this edge;
+            // this is the first trace packet architecturally after MRET.
+            check_word(
+              dut.u_csr_file.mstatus_q,
+              MSTATUS_MPP_M_VALUE | MSTATUS_MPIE_MASK,
+              "MRET commit mstatus side effects"
+            );
+          end
           32'h0000_0034: check_csr_result(5'd11, illegal_csr_insn, "returned mtval");
           32'h0000_0038: check_csr_result(5'd12, 32'h0000_0030, "updated mepc");
           32'h0000_003c: check_csr_result(5'd15, 32'd19, "ordered minstret");
+          32'h0000_0040: check_csr_result(5'd16, MIP_MTIP_MASK, "live mip.MTIP");
           default: ;
         endcase
 
@@ -267,7 +295,7 @@ module tb_csr_core;
 
         if (
           (trap_count != 1) ||
-          (csr_result_count != 14) ||
+          (csr_result_count != 15) ||
           !saw_mret
         ) begin
           $fatal(

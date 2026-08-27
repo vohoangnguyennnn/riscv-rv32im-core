@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 // Gate-4 integration test for request backpressure, delayed responses, load-use
 // ordering, and MDU launch suppression behind an older unresolved memory op.
@@ -32,6 +31,7 @@ module tb_pipeline_memory_wait;
   logic [31:0] trace_mem_wdata;
   logic        trace_trap;
   logic [4:0]  trace_cause;
+  logic        trace_is_interrupt;
   logic        trace_control;
   logic        trace_taken;
   logic [31:0] trace_target;
@@ -48,6 +48,7 @@ module tb_pipeline_memory_wait;
   rv32_core dut (
     .clk_i             (clk),
     .rst_i             (rst),
+    .mtip_i            (1'b0),
     .imem_m            (imem),
     .dmem_m            (dmem),
     .trace_valid_o     (trace_valid),
@@ -61,9 +62,18 @@ module tb_pipeline_memory_wait;
     .trace_mem_wdata_o (trace_mem_wdata),
     .trace_trap_o      (trace_trap),
     .trace_cause_o     (trace_cause),
+    .trace_is_interrupt_o (trace_is_interrupt),
     .trace_control_o   (trace_control),
     .trace_taken_o     (trace_taken),
-    .trace_target_o    (trace_target)
+    .trace_target_o    (trace_target),
+    .perf_cycle_o          (),
+    .perf_instret_o        (),
+    .perf_load_use_stall_o (),
+    .perf_csr_stall_o      (),
+    .perf_mdu_stall_o      (),
+    .perf_mem_stall_o      (),
+    .perf_redirect_o       (),
+    .perf_squash_o         ()
   );
 
   rv32_delayed_mem #(

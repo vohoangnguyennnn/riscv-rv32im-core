@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 // Test-only unified memory with independent request and response delays on the
 // data port. The instruction port remains fixed one-cycle so a directed test

@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 
 // Reusable instruction encoders for directed pipeline integration tests.
 // Keeping encoders in a test-only package makes programs readable while the
