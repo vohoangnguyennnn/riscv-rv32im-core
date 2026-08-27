@@ -1,5 +1,9 @@
 -f files/core.f
 rtl/soc/rv32_tcm.sv
+rtl/soc/rv32_mtimer.sv
+rtl/soc/rv32_uart.sv
+rtl/soc/rv32_gpio.sv
+rtl/soc/rv32_mem_demux.sv
 rtl/fpga/reset_sync.sv
 tb/unit/tb_alu.sv
 tb/unit/tb_imm_gen.sv
@@ -8,6 +12,10 @@ tb/unit/tb_branch_unit.sv
 tb/unit/tb_regfile.sv
 tb/unit/tb_reset_sync.sv
 tb/unit/tb_rv32_tcm.sv
+tb/unit/tb_rv32_mtimer.sv
+tb/unit/tb_rv32_uart.sv
+tb/unit/tb_rv32_gpio.sv
+tb/unit/tb_rv32_mem_demux.sv
 tb/unit/tb_lsu.sv
 tb/unit/tb_if_stage.sv
 tb/unit/tb_id_stage.sv
