@@ -1,4 +1,3 @@
-/* SPDX-License-Identifier: MIT */
 
 OUTPUT_ARCH(riscv)
 ENTRY(_start)
@@ -67,6 +66,15 @@ SECTIONS
   . = ALIGN(16);
   __image_end = .;
 
+  /* Host-readable CoreMark result block; empty for all other programs. */
+  .coremark_report 0x0000e000 (NOLOAD) : ALIGN(4)
+  {
+    KEEP(*(.coremark_report))
+  } > TCM :data
+
+  ASSERT(SIZEOF(.coremark_report) <= 0x100,
+         "CoreMark report exceeds its reserved TCM window")
+
   /* Reserve 4 KiB for the downward-growing stack. */
   __stack_bottom = 0x0000ef00;
   __stack_top    = 0x0000ff00;
@@ -77,8 +85,8 @@ SECTIONS
     KEEP(*(.tohost))
   } > TCM :data
 
-  ASSERT(__image_end <= __stack_bottom,
-         "software image overlaps the reserved stack")
+  ASSERT(__image_end <= 0x0000e000,
+         "software image overlaps the CoreMark report/stack window")
   ASSERT(SIZEOF(.tohost) == 4, "tohost must be exactly one 32-bit word")
 
   /DISCARD/ :
