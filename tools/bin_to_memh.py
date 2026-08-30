@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: MIT
 """Convert a little-endian flat binary into a word-oriented Verilog hex file."""
 
 from __future__ import annotations
