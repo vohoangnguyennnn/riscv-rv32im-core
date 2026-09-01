@@ -27,10 +27,8 @@ module rv32_core_interrupt_sva (
   input logic        id_ex_ctrl_zero_i
 );
 
-  default clocking cb @(posedge clk_i);
-  endclocking
-
   property p_candidate_requires_effective_eligibility;
+    @(posedge clk_i)
     disable iff (rst_i)
     interrupt_candidate_i |-> irq_eligible_i
                               && !irq_state_ambiguous_i
@@ -38,6 +36,7 @@ module rv32_core_interrupt_sva (
   endproperty
 
   property p_enable_commit_builds_immediate_candidate;
+    @(posedge clk_i)
     disable iff (rst_i)
     mem_wb_irq_state_writer_i
       && !irq_eligible_before_commit_i
@@ -50,11 +49,13 @@ module rv32_core_interrupt_sva (
   endproperty
 
   property p_interrupt_event_originates_from_candidate;
+    @(posedge clk_i)
     disable iff (rst_i)
     interrupt_event_i |-> interrupt_candidate_i;
   endproperty
 
   property p_accepted_interrupt_builds_precise_packet;
+    @(posedge clk_i)
     disable iff (rst_i)
     interrupt_accept_i |=> id_ex_valid_i
                           && id_ex_exc_valid_i
@@ -83,19 +84,20 @@ module rv32_core_interrupt_sva (
   ) else $error("accepted timer interrupt did not create a side-effect-free precise packet");
 
   c_interrupt_candidate: cover property (
-    disable iff (rst_i) interrupt_candidate_i
+    @(posedge clk_i) disable iff (rst_i) interrupt_candidate_i
   );
 
   c_interrupt_accepted: cover property (
-    disable iff (rst_i) interrupt_accept_i
+    @(posedge clk_i) disable iff (rst_i) interrupt_accept_i
   );
 
   c_interrupt_candidate_rejected: cover property (
-    disable iff (rst_i) interrupt_candidate_i && !interrupt_accept_i
+    @(posedge clk_i) disable iff (rst_i)
+    interrupt_candidate_i && !interrupt_accept_i
   );
 
   c_enable_commit_interrupt: cover property (
-    disable iff (rst_i)
+    @(posedge clk_i) disable iff (rst_i)
     mem_wb_irq_state_writer_i
       && !irq_eligible_before_commit_i
       && irq_eligible_after_commit_i

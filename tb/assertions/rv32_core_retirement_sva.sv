@@ -17,30 +17,32 @@ module rv32_core_retirement_sva (
   input logic        commit_slot_flush_i
 );
 
-  default clocking cb @(posedge clk_i);
-  endclocking
-
   property p_commit_slot_never_retires_while_held;
+    @(posedge clk_i)
     disable iff (rst_i)
     trace_valid_i |-> commit_slot_enable_i || commit_slot_flush_i;
   endproperty
 
   property p_trap_has_no_side_effect;
+    @(posedge clk_i)
     disable iff (rst_i)
     trace_trap_i |-> trace_valid_i && !trace_rd_we_i && (trace_mem_wstrb_i == 4'b0000);
   endproperty
 
   property p_gpr_write_is_legal_retirement;
+    @(posedge clk_i)
     disable iff (rst_i)
     trace_rd_we_i |-> trace_valid_i && !trace_trap_i && (trace_rd_addr_i != 5'd0);
   endproperty
 
   property p_store_is_legal_retirement;
+    @(posedge clk_i)
     disable iff (rst_i)
     (trace_mem_wstrb_i != 4'b0000) |-> trace_valid_i && !trace_trap_i;
   endproperty
 
   property p_invalid_slot_has_no_event;
+    @(posedge clk_i)
     disable iff (rst_i)
     !trace_valid_i |-> !trace_rd_we_i
                       && (trace_mem_wstrb_i == 4'b0000)
@@ -50,16 +52,19 @@ module rv32_core_retirement_sva (
   endproperty
 
   property p_nontrap_cause_is_zero;
+    @(posedge clk_i)
     disable iff (rst_i)
     trace_valid_i && !trace_trap_i |-> (trace_cause_i == 5'b0);
   endproperty
 
   property p_control_metadata_is_consistent;
+    @(posedge clk_i)
     disable iff (rst_i)
     trace_taken_i |-> trace_valid_i && trace_control_i && !trace_trap_i;
   endproperty
 
   property p_retirement_pc_is_aligned;
+    @(posedge clk_i)
     disable iff (rst_i)
     trace_valid_i |-> (trace_pc_i[1:0] == 2'b00);
   endproperty
@@ -90,19 +95,20 @@ module rv32_core_retirement_sva (
     else $error("retirement PC violated RV32 IALIGN=32");
 
   c_retirement: cover property (
-    disable iff (rst_i) trace_valid_i && !trace_trap_i
+    @(posedge clk_i) disable iff (rst_i) trace_valid_i && !trace_trap_i
   );
 
   c_trap: cover property (
-    disable iff (rst_i) trace_valid_i && trace_trap_i
+    @(posedge clk_i) disable iff (rst_i) trace_valid_i && trace_trap_i
   );
 
   c_store_retirement: cover property (
-    disable iff (rst_i) trace_valid_i && (trace_mem_wstrb_i != 4'b0000)
+    @(posedge clk_i) disable iff (rst_i)
+    trace_valid_i && (trace_mem_wstrb_i != 4'b0000)
   );
 
   c_taken_control_retirement: cover property (
-    disable iff (rst_i) trace_valid_i && trace_taken_i
+    @(posedge clk_i) disable iff (rst_i) trace_valid_i && trace_taken_i
   );
 
 endmodule

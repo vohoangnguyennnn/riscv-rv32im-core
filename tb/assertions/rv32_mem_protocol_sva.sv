@@ -41,10 +41,8 @@ module rv32_mem_protocol_sva #(
     end
   end
 
-  default clocking cb @(posedge clk_i);
-  endclocking
-
   property p_request_stable_until_ready;
+    @(posedge clk_i)
     disable iff (rst_i)
     req_valid_i && !req_ready_i
       |=> req_valid_i && $stable({
@@ -56,26 +54,31 @@ module rv32_mem_protocol_sva #(
   endproperty
 
   property p_no_response_without_request;
+    @(posedge clk_i)
     disable iff (rst_i)
     rsp_valid_i |-> outstanding_q || request_fire;
   endproperty
 
   property p_at_most_one_outstanding;
+    @(posedge clk_i)
     disable iff (rst_i)
     outstanding_q && !rsp_valid_i |-> !request_fire;
   endproperty
 
   property p_request_is_word_aligned;
+    @(posedge clk_i)
     disable iff (rst_i)
     req_valid_i |-> (req_addr_i[1:0] == 2'b00);
   endproperty
 
   property p_read_has_no_write_strobes;
+    @(posedge clk_i)
     disable iff (rst_i)
     req_valid_i && !req_write_i |-> (req_wstrb_i == 4'b0000);
   endproperty
 
   property p_write_has_active_strobe;
+    @(posedge clk_i)
     disable iff (rst_i)
     req_valid_i && req_write_i |-> (req_wstrb_i != 4'b0000);
   endproperty
@@ -99,19 +102,20 @@ module rv32_mem_protocol_sva #(
     else $error("rv32_mem port %0d issued a write with no active byte lane", PORT_ID);
 
   c_request_accepted: cover property (
-    disable iff (rst_i) request_fire
+    @(posedge clk_i) disable iff (rst_i) request_fire
   );
 
   c_request_backpressured: cover property (
-    disable iff (rst_i) req_valid_i && !req_ready_i
+    @(posedge clk_i) disable iff (rst_i) req_valid_i && !req_ready_i
   );
 
   c_response_observed: cover property (
-    disable iff (rst_i) rsp_valid_i
+    @(posedge clk_i) disable iff (rst_i) rsp_valid_i
   );
 
   c_response_and_reissue: cover property (
-    disable iff (rst_i) outstanding_q && rsp_valid_i && request_fire
+    @(posedge clk_i) disable iff (rst_i)
+    outstanding_q && rsp_valid_i && request_fire
   );
 
 endmodule
