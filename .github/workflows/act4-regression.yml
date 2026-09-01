@@ -5,6 +5,7 @@ on:
     paths:
       - "rtl/**"
       - "files/core.f"
+      - "tb/assertions/**"
       - "tb/integration/tb_baremetal.sv"
       - "tools/elf_to_memh.py"
       - "verification/act4/**"
@@ -14,6 +15,7 @@ on:
     paths:
       - "rtl/**"
       - "files/core.f"
+      - "tb/assertions/**"
       - "tb/integration/tb_baremetal.sv"
       - "tools/elf_to_memh.py"
       - "verification/act4/**"
