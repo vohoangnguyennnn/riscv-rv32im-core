@@ -50,6 +50,7 @@ FREERTOS_CPU_CLOCK_HZ ?= 75000000
 FREERTOS_BLINK_PERIOD_MS ?= 2
 FREERTOS_CPPFLAGS := \
 	-Iinclude \
+	-I$(FREERTOS_APP_DIR)/include \
 	-I$(FREERTOS_APP_DIR) \
 	-I$(FREERTOS_DIR)/include \
 	-I$(FREERTOS_DIR)/portable/GCC/RISC-V \
@@ -83,6 +84,7 @@ FREERTOS_HEADERS := \
 	$(wildcard $(FREERTOS_DIR)/include/*.h) \
 	$(FREERTOS_DIR)/portable/GCC/RISC-V/portContext.h \
 	$(FREERTOS_DIR)/portable/GCC/RISC-V/portmacro.h \
+	$(wildcard $(FREERTOS_APP_DIR)/include/*.h) \
 	$(FREERTOS_APP_DIR)/FreeRTOSConfig.h \
 	$(FREERTOS_APP_DIR)/freertos_risc_v_chip_specific_extensions.h \
 	include/freertos_demo.h \
