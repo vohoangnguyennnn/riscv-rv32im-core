@@ -385,9 +385,9 @@ evidence.
 
 ## 8. Latest supplied implementation result
 
-The latest package, `Report_vivado/freertos/20260825_195339/`, was generated on
-2026-08-25 with Vivado 2024.1 build 5076996 for `xc7a35tfgg484-2`. It records
-Git state `e5eb288-dirty`, top `fpga_top`, and
+The validated package, `Report_vivado/freertos/20260903_103705/`, was generated
+on 2026-09-03 with Vivado 2024.1 build 5076996 for `xc7a35tfgg484-2`. It records
+clean implementation commit `fc57a72`, top `fpga_top`, and
 `TCM_INIT_FILE=freertos_demo.mem SOC_CLK_FREQ_HZ=75000000`.
 
 | Gate | Reviewed result |
@@ -446,6 +446,16 @@ Resource use is:
 The four `DPOP-1` and four `DPOP-2` warnings identify unpipelined multiplier
 DSP outputs/stages. They are accepted for this 75 MHz implementation because
 routed timing closes, but remain optimization guidance rather than waivers.
+
+The methodology report contains 21 reviewed warnings: one `LUTAR-1`, four
+`SYNTH-10`, and sixteen `SYNTH-15`. `SYNTH-10` describes the intended wide
+RV32M multiplier decomposition into four DSPs. `SYNTH-15` records the selected
+BRAM implementation for the byte-write-enabled 64 KiB TCM; functional byte
+semantics are verified independently. `LUTAR-1` identifies the LUT combining
+the external reset requests and MMCM `locked` before the asynchronous-assert,
+synchronous-release reset chain. For this board prototype, a transient there
+can conservatively restart the SoC; it is not accepted as a general
+production-reset waiver.
 
 <p align="center">
   <a href="images/utilization_report.png">
@@ -528,8 +538,8 @@ UART RX/TX, GPIO, and status outputs.
 </p>
 
 <p align="center"><em>Recorded local FreeRTOS bring-up on the MicroPhase
-A7-Lite Artix-7 target. The exact bitstream from the final clean export still
-requires one program-and-capture pass.</em></p>
+A7-Lite Artix-7 target. The board checks were repeated with the clean-package
+bitstream identified by the release manifest.</em></p>
 
 <p align="center">
   <a href="images/uart-terminal.png">
@@ -538,8 +548,9 @@ requires one program-and-capture pass.</em></p>
 </p>
 
 <p align="center"><em>Physical CH340 session at 115200 8N1. The terminal
-records repeatable boot output and character echo; final release binding still
-depends on the clean-export bitstream hash.</em></p>
+records repeatable boot output and character echo. The current clean-package
+retest binds the same observed behavior to the bitstream hash in the hardware
+validation record.</em></p>
 
 1. Confirm A7-Lite R1.1 board revision and the populated FPGA marking.
 2. Build `freertos_demo.mem` with the 75 MHz timer setting and the selected
@@ -565,12 +576,11 @@ depends on the clean-export bitstream hash.</em></p>
 8. Capture board revision, device marking, Vivado version, source state,
    firmware/report/bitstream hashes, and board evidence.
 
-FreeRTOS was recorded as deployed successfully on the named A7-Lite at 75 MHz.
-The exact bitstream exported after the final clean commit still requires one
-last program-and-capture pass. RTL simulation remains the quantitative oracle for
-UART bytes, GPIO transitions, timer traps, and scheduler counts. If firmware
-changes TCM contents, reprogram the bitstream before calling a later reboot
-image-identical.
+FreeRTOS was deployed successfully on the named A7-Lite at 75 MHz, including a
+retest of the exact clean-package bitstream. RTL simulation remains the
+quantitative oracle for UART bytes, GPIO transitions, timer traps, and
+scheduler counts. If firmware changes TCM contents, reprogram the bitstream
+before calling a later reboot image-identical.
 
 ## 10. References
 

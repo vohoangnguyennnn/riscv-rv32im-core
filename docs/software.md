@@ -356,7 +356,7 @@ The FPGA TCM is initialized from a generated `.mem` image. `.data` already has
 identical load and virtual addresses, so startup performs no ROM-to-RAM copy.
 The TCM array is not reset; asserting CPU reset preserves its contents.
 
-The current Vivado release-candidate package selects `freertos_demo.mem`, and
+The validated clean-source Vivado package selects `freertos_demo.mem`, and
 `FREERTOS_CPU_CLOCK_HZ` matches the 75 MHz clock that advances `mtime`. The
 regression image uses the 2 ms blink default; the board image uses
 `FREERTOS_BLINK_PERIOD_MS=250` so GPIO activity is human-observable. This
@@ -383,8 +383,10 @@ and image/bitstream identity by
 [§7](hardware-validation.md#7-artifact-identity).
 Changing the firmware image, SoC clock, wrapper, XDC, target part, or Vivado
 strategy requires a new implementation and hardware-validation record. The
-current package was exported from a dirty worktree; the public release must be
-regenerated from the final clean commit and its exact bitstream retested.
+current package was exported from clean implementation commit `fc57a72`; its
+exact hash-identified bitstream passed the documented board checks. A later
+change to implementation-affecting inputs invalidates that binding and requires
+another export and board run.
 
 ## 8. Explicit limitations
 

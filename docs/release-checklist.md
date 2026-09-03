@@ -19,11 +19,11 @@ The authoritative evidence record is [Hardware validation](hardware-validation.m
 
 - [ ] Review and commit all intended source, third-party pinning, documentation, and CI changes.
 - [ ] Confirm `git status --short` is empty at the release commit.
-- [ ] Run the full release regression and save its console log.
-- [ ] Rebuild the 250 ms board FreeRTOS image from that commit.
-- [ ] Re-run synthesis, implementation, and the FreeRTOS release export from that commit.
-- [ ] Program the exact exported `fpga_top.bit`; capture UART and board evidence.
-- [ ] Record the final commit ID and replacement hashes in `hardware-validation.md`.
+- [x] Run the full release regression and save its console log.
+- [x] Rebuild the 250 ms board FreeRTOS image from clean implementation commit `fc57a72`.
+- [x] Re-run synthesis, implementation, and the FreeRTOS release export from that commit.
+- [x] Program the exact exported `fpga_top.bit` and repeat the UART/GPIO/PASS/reset checks.
+- [x] Record the implementation commit and replacement hashes in `hardware-validation.md`.
 - [ ] Tag `v1.0.0` and attach the Vivado evidence directory or a compressed copy to the GitHub release.
 
 ## Final commands
@@ -46,4 +46,7 @@ source {/absolute/path/to/scripts/vivado/export_release_reports.tcl}
 
 The exporter writes `Report_vivado/freertos/<timestamp>/`. Do not tag the
 release if the manifest reports a dirty source state or if the programmed
-bitstream hash differs from that package.
+bitstream hash differs from that package. Any later change to RTL, software,
+XDC, Clocking Wizard configuration, target part, or FPGA source list reopens
+the implementation and board gates; documentation-only packaging changes do
+not alter the recorded hardware artifact.

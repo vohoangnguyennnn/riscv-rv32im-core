@@ -1,6 +1,6 @@
 # Hardware Validation Evidence Record
 
-This document records the release-candidate evidence for the RV32IM core and
+This document records the validation evidence for the RV32IM core and
 its FreeRTOS FPGA SoC integration. It separates reproducible simulation,
 post-route implementation, artifact identity, and physical-board observation
 so that no one class of evidence is presented as another.
@@ -20,13 +20,14 @@ Detailed contracts remain in [Architecture](architecture.md),
 | Current ten-port board boundary | PASS in the post-route I/O report |
 | Bitstream generation and artifact pairing | PASS; firmware and bitstream are hash-identified |
 | Physical FreeRTOS bring-up | PASS recorded for board boot, UART echo, GPIO, and status outputs |
-| Exact packaged bitstream `347724dd...` deployed after a clean tagged commit | **PENDING** |
+| Exact clean-package bitstream `94603524...` deployed on the target board | **PASS** |
 
-The current implementation package closes the previous six-I/O/smoke-image
-gap: it uses `TCM_INIT_FILE=freertos_demo.mem` and contains all ten constrained
-top-level ports. It was nevertheless captured from a dirty worktree. A public
-`v1.0.0` release should therefore regenerate this package from the final clean
-commit and program that exact bitstream once more.
+The current implementation package uses `TCM_INIT_FILE=freertos_demo.mem`,
+contains all ten constrained top-level ports, and was exported from clean
+implementation commit `fc57a72`. The exact manifest-identified bitstream was
+programmed and passed the documented FreeRTOS board checks. The remaining
+`v1.0.0` work is repository/release publication rather than hardware
+validation.
 
 This project does not claim official RISC-V certification, an EEMBC-certified
 CoreMark submission, FPGA Fmax, measured board power, production PVT closure,
@@ -37,14 +38,14 @@ or silicon qualification.
 The local source package is:
 
 ```text
-Report_vivado/freertos/20260825_195339/
+Report_vivado/freertos/20260903_103705/
 ```
 
 | Item | Recorded value |
 |---|---|
-| Generated | 2026-08-25 19:53:41 +07 |
-| Git HEAD | `e5eb28813663b77c69228e4f4b5163d5be9d599c` |
-| Source state | `e5eb288-dirty` |
+| Generated | 2026-09-03 10:37:07 +07 |
+| Git HEAD | `fc57a72d88ff85bdc19b1840a5341c5878c2d966` |
+| Source state | clean |
 | Vivado | 2024.1, build 5076996 |
 | FPGA | AMD/Xilinx Artix-7 `xc7a35tfgg484-2` |
 | Top | `fpga_top` |
@@ -190,6 +191,14 @@ DSP pipelining advisories. They are accepted for the documented 75 MHz point
 because routed timing closes; they remain optimization guidance rather than a
 general waiver.
 
+The methodology report contains 21 reviewed warnings: one `LUTAR-1`, four
+`SYNTH-10`, and sixteen `SYNTH-15`. The `SYNTH-10` and `SYNTH-15` findings
+describe the selected wide-multiplier and byte-write-enabled TCM mappings.
+`LUTAR-1` flags the LUT that combines reset requests and MMCM `locked` before
+the asynchronous-assert, synchronous-release reset chain. A transient at that
+point can conservatively restart this board prototype; this disposition is not
+a production reset-safety waiver.
+
 <p align="center">
   <a href="images/utilization_report.png">
     <img src="images/utilization_report.png" alt="Hierarchical utilization for the routed FreeRTOS FPGA implementation" width="1000">
@@ -239,10 +248,10 @@ The post-route I/O report contains the complete ten-port boundary:
 | W22 | `done_o` | Output | Active-high DONE on JP2 pin 2 |
 
 The recorded board bring-up observed boot, UART `READY`, UART echo, GPIO
-activity, PASS/DONE, and repeatable reset on a MicroPhase A7-Lite R1.1. That
-observation establishes the hardware concept. Before publishing `v1.0.0`, the
-exact clean-commit bitstream exported in the final package must be programmed
-and its hash recorded with a new photograph or terminal capture.
+activity, PASS/DONE, and repeatable reset on a MicroPhase A7-Lite R1.1. Those
+checks were repeated with the exact clean-package bitstream identified in
+Section 7. The photographs and terminal capture remain qualitative supporting
+evidence; the manifest is the artifact-identity authority.
 
 <p align="center">
   <a href="images/board.png">
@@ -273,31 +282,33 @@ bind the observed session to a bitstream hash.</em></p>
   </a>
 </p>
 
-<p align="center"><em>The board firmware build emits the complete 64 KiB TCM
-image and reproduces the ELF/MEM identities recorded below.</em></p>
+<p align="center"><em>The build capture illustrates the 64 KiB TCM image flow.
+The current values below and the packaged manifest are the artifact-identity
+authority.</em></p>
 
 | Artifact | SHA-256 |
 |---|---|
-| `freertos_demo.elf` | `bbf990e8354939ed0b18484458e6f28a1cef62027429bd19eb481d9ed7be8bc3` |
+| `freertos_demo.elf` | `9a220086ab3629aa791374ccf843b6349d307da419ec0392afae031f984de359` |
 | `freertos_demo.mem` | `1ab72163b3fd5469a48981e549343f1979dd47039002231c715ae70b6c9022b4` |
-| `freertos_demo.map` | `60db9c35402a0c10ad983429efc21db189b03f54b6dad7b0174006b8c9526649` |
+| `freertos_demo.map` | `a986b44ee4e8f8c242701de177fc1a5682ffb26a6c50105cefdc1be09fa48e00` |
 | `freertos_demo.dump` | `f18e4d9fd3207dba49e5c0c4a7897cb6f6bd8dc9d4490400ee8d217f58ed90d4` |
-| `fpga_top.bit` | `347724ddf947c64612a9eda5934dd54e2e59f1f222aaa609d75981d4c81e88d8` |
+| `fpga_top.bit` | `9460352401ae6037545aa4671e3dd4e46c49ad779eea0c142569b6194865581a` |
 
 ### 7.2 Sign-off report hashes
 
 | Report | SHA-256 |
 |---|---|
-| `timing_summary.rpt` | `3a0c77c6cc374cca16d074e0573497288739189d4592f76b3b8d074ea8c8701a` |
-| `utilization_flat.rpt` | `bb51505ad547b7bce7b03b46e394196581f6c1347bc41066e14f587560420e75` |
-| `drc.rpt` | `8af9e5b413dcab182cd1efba9bfad7ad2ccd51ba882c6d30401734835948e78b` |
-| `io.rpt` | `f55c6fdab89d16748a1a94dbd6982aac359f4991709f930e80d2199baf155243` |
-| `power.rpt` | `beaa6c82b5fef066777ff8ff5301e181f4bf936d75037b2cc814ece73281f3cc` |
+| `timing_summary.rpt` | `4d27050523c6d1d59955bb1dd2a34327f81a6536717bae6df220329b5c945067` |
+| `utilization_flat.rpt` | `4fbca832bd25542bc3cc3cfc11b3d90e5262d8d131857600ac6bc872e87482ba` |
+| `drc.rpt` | `0a30143ab28c3a9803e9f53e021e277db49cb83896c5425d785d9ce18b64355e` |
+| `methodology.rpt` | `565c18ab23ab28bb539bbefc21aae54750a1621e2271c1b1c246741b3ca67311` |
+| `io.rpt` | `40ea6ef07bb712da24756b07aed173f2e2e89fe67b5c69ac7dbbd9a6e60062cf` |
+| `power.rpt` | `1b0cff6693e45331b366f95afdf0eafe214400813caea3a20fe84c9011c36894` |
 | `route_status.rpt` | `d946bd7284237a8d6dfe4b98ea6bf5be91554a3d8546d988252249bdd2645edf` |
 
-These hashes identify the current dirty-worktree release candidate. They must
-be replaced by the clean-commit export manifest before tagging the public
-release.
+These hashes identify the clean-source implementation package that was used
+for the exact-bitstream board retest. `artifact_manifest.txt` in the release
+archive remains authoritative.
 
 ## 8. Two-stage board validation model
 
@@ -319,10 +330,12 @@ are unchanged.
 - [x] The ten-port RTL/XDC boundary is present in `io.rpt`.
 - [x] Routing, timing, and DRC sign-off gates pass.
 - [x] Firmware, bitstream, and reports have SHA-256 identities.
+- [x] The Vivado DRC and methodology warnings are classified and documented.
+- [x] The package was exported from clean implementation commit `fc57a72`.
+- [x] The exact clean-package bitstream passed UART/GPIO/PASS/reset board checks.
 - [ ] Commit the complete release source and documentation so the tree is clean.
-- [ ] Re-export the Vivado package from that clean commit.
-- [ ] Program the exact clean-export bitstream and capture UART/GPIO/PASS evidence.
 - [ ] Tag and publish `v1.0.0` with the packaged artifacts.
 
-Until the final four items close, the accurate status is **release candidate**,
-not an immutable tagged release.
+Hardware validation is complete. Until the final two publication items close,
+the accurate status is **validated release candidate**, not an immutable tagged
+release.

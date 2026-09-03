@@ -29,14 +29,15 @@ The repository is organized as an evidence-backed engineering project: architect
 | Power estimate | 0.253 W vectorless post-route estimate; Medium confidence, not board-measured |
 | Directed performance | 35,245 instructions in 50,101 cycles; CPI 1.422, IPC 0.703 |
 | CoreMark | 2.127 CoreMark/MHz, CRC-valid performance run |
-| Board bring-up | FreeRTOS boot, UART, GPIO, PASS/DONE, and reset behavior recorded; exact packaged release-candidate bitstream retest pending |
+| Board bring-up | Clean-package FreeRTOS bitstream validated for boot, UART echo, GPIO, PASS/DONE, and both reset paths |
 
-Results above were recorded on 2026-08-25. The current implementation package
-was captured from `e5eb288-dirty` with `TCM_INIT_FILE=freertos_demo.mem` and the
-complete ten-port board boundary. It is a release candidate: regenerate it from
-the final clean commit and program that exact bitstream before tagging `v1.0.0`.
-Exact tool versions, hashes, and evidence boundaries are recorded in the
-[hardware validation report](docs/hardware-validation.md).
+The current implementation package was exported on 2026-09-03 from clean
+implementation commit `fc57a72` with `TCM_INIT_FILE=freertos_demo.mem` and the
+complete ten-port board boundary. Its hash-identified bitstream was programmed
+and passed the recorded FreeRTOS board checks. Exact tool versions, hashes,
+reviewed warnings, and evidence boundaries are recorded in the
+[hardware validation report](docs/hardware-validation.md). Publication of the
+`v1.0.0` GitHub release remains a packaging step, not an open hardware gate.
 
 ## Engineering highlights
 
@@ -150,8 +151,8 @@ Detailed test ownership, checker behavior, expected counts, and residual verific
 
 ![MicroPhase A7-Lite deployment](docs/images/board.png)
 
-*Recorded FreeRTOS board bring-up. The exact bitstream in the current dirty-tree
-release-candidate package still requires one final board retest.*
+*Recorded FreeRTOS board bring-up; the same checks were repeated with the
+clean-package bitstream identified in the hardware validation record.*
 
 <p align="center">
   <a href="docs/images/uart-terminal.png">
@@ -282,9 +283,10 @@ For a technical review, read Architecture → Pipeline control → Verification 
 
 This repository demonstrates an engineering-prototype core and SoC with a routed 75 MHz implementation point. It does **not** claim RISC-V certification, EEMBC certification, production-silicon qualification, measured power, PVT closure, reliability sign-off, or FPGA Fmax.
 
-The current implementation, firmware, and bitstream form one hash-identified
-FreeRTOS release-candidate package. A clean-commit export and deployment of
-that exact final bitstream remain required before it is an immutable release.
+The current implementation, firmware, and bitstream form one hash-identified,
+clean-source FreeRTOS package that has been deployed on the target board. The
+repository remains an engineering prototype; creating the Git tag and attaching
+the immutable package are the remaining public-release operations.
 
 ## License
 
