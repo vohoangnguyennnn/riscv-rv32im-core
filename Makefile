@@ -15,6 +15,7 @@ COREMARK_ITERATIONS ?= 0
 COREMARK_MAX_CYCLES ?= 2000000000
 COREMARK_MAX_TRACE_EVENTS ?= 2000000000
 FREERTOS_MAX_CYCLES ?= 1500000
+GENERATED_REPORT_DIR ?= build/generated-reports
 
 # RISC-V Architectural Certification Tests (ACT4). Source, generated ELFs,
 # tool caches, and RTL diagnostics stay outside the repository. The exact ACT4
@@ -366,7 +367,7 @@ benchmark: benchmark-images $(BAREMETAL_SIM)
 	@$(PYTHON) tools/run_benchmarks.py \
 		--sim "$(BAREMETAL_SIM)" \
 		--image-dir "$(SOFTWARE_BUILD_DIR)" \
-		--output docs/performance.md
+		--output "$(GENERATED_REPORT_DIR)/performance.md"
 
 coremark-images:
 	@$(MAKE) -C sw BUILD_DIR=$(SOFTWARE_BUILD_DIR) \
@@ -379,7 +380,7 @@ coremark: coremark-images $(BAREMETAL_SIM)
 		--compiler "$(COREMARK_CC)" \
 		--max-cycles $(COREMARK_MAX_CYCLES) \
 		--max-trace-events $(COREMARK_MAX_TRACE_EVENTS) \
-		--output docs/coremark.md
+		--output "$(GENERATED_REPORT_DIR)/coremark.md"
 
 isa-images:
 	@$(MAKE) -C sw/isa BUILD_DIR=$(ISA_BUILD_DIR) all
@@ -423,8 +424,8 @@ help:
 	@echo "  make baremetal    Build and run all freestanding software tests"
 	@echo "  make freertos     Build and run the blink + UART echo FreeRTOS SoC demo"
 	@echo "  make fpga-freertos-images  Build the 75 MHz, 250 ms-blink FPGA FreeRTOS image"
-	@echo "  make benchmark    Run four CPI/IPC microbenchmarks and write docs/performance.md"
-	@echo "  make coremark     Run standard 2K performance/validation seeds and write docs/coremark.md"
+	@echo "  make benchmark    Run four CPI/IPC microbenchmarks and write build/generated-reports/performance.md"
+	@echo "  make coremark     Run standard 2K performance/validation seeds and write build/generated-reports/coremark.md"
 	@echo "  make baremetal-X  Build and run one software test (smoke or trap)"
 	@echo "  make isa          Run the complete Gate 6 RV32I/RV32M ISA suite"
 	@echo "  make isa-rv32ui   Run all in-scope upstream rv32ui tests"

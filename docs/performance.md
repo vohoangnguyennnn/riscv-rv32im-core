@@ -106,9 +106,11 @@ make benchmark
 ```
 
 The target builds the four ILP32 images, executes each through
-`tb_baremetal`, and regenerates the result table using
-`tools/run_benchmarks.py`. Build flags, linker layout, and completion
-semantics are defined in [Software](software.md).
+`tb_baremetal`, and writes the machine-generated result snapshot to
+`build/generated-reports/performance.md` using `tools/run_benchmarks.py`.
+The checked-in document remains the reviewed, frozen evidence record rather
+than being overwritten by a routine run. Build flags, linker layout, and
+completion semantics are defined in [Software](software.md).
 
 <p align="center">
   <a href="images/benchmark-log.png">

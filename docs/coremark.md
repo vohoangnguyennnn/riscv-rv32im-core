@@ -121,7 +121,8 @@ direct cycle costs.</em></p>
 
 ## 5. Reproduction and claim boundary
 
-Run both seed sets and regenerate the report with:
+Run both seed sets and generate a fresh machine-readable Markdown snapshot
+with:
 
 ```sh
 make coremark
@@ -129,7 +130,9 @@ make coremark
 
 This is intentionally a long RTL simulation because each measured region must
 represent at least ten architectural seconds. Generated software artifacts
-remain below `/tmp/rv32im-core-software-*`.
+remain below `/tmp/rv32im-core-software-*`; the generated result is written to
+`build/generated-reports/coremark.md`. The checked-in document remains the
+reviewed, frozen evidence record.
 
 The score assumes the documented compiler, port, memory latency, single-context
 configuration, and 75 MHz architectural clock. It is not a board stopwatch
