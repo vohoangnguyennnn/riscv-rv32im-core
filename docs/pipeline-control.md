@@ -43,15 +43,8 @@ Five invariants govern the control implementation:
 5. **Age priority:** an older trap, fault, or wait defeats every younger event
    in the same cycle.
 
-The datapath carries typed packets through four valid-bit boundaries:
-
-```text
- imem -> IF -> IF/ID -> ID -> ID/EX -> EX -> EX/MEM -> MEM -> MEM/WB -> WB
-          ^                         |               |
-          +--------- redirect ------+               +---- dmem
-
-          hazard_unit + forwarding_unit + pipeline_ctrl
-```
+The four packed pipeline boundaries use `valid` bits to distinguish active
+instructions from bubbles.
 
 `valid=0` is a bubble. Invalid payload fields are not architecturally
 meaningful. Every pipeline register uses the same storage priority:
@@ -197,10 +190,7 @@ MEM fault kills younger MDU work.
 A valid load or store owns EX/MEM until the LSU response is available:
 
 ```text
-mem_wait = ex_mem.valid
-        && !ex_mem.exc.valid
-        && (load || store)
-        && !lsu_rsp_valid
+mem_wait = ex_mem.valid && !ex_mem.exc.valid && (load || store) && !lsu_rsp_valid
 ```
 
 The LSU permits one transaction. A request held under backpressure preserves
@@ -240,10 +230,7 @@ All implemented control transfers resolve in EX with forwarded operands:
 | `MRET` | Always | Current `mepc` |
 
 ```text
-redirect.valid = ex_fire
-              && is_control_transfer
-              && control_taken
-              && !exception
+redirect.valid = ex_fire && is_control_transfer && control_taken && !exception
 ```
 
 On an accepted redirect, the control instruction is captured into EX/MEM and
