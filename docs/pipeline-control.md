@@ -18,6 +18,11 @@ interstage hazard/bubble markers. The hold, flush, redirect, and retirement
 rules that actually govern packet flow are specified in the sections below,
 not depicted in this diagram.</em></p>
 
+The [annotated end-to-end datapath](images/pipeline_datapath.jpg) maps these
+rules onto the pipeline registers, forwarding muxes, branch/CSR paths, LSU, and
+writeback selection. It is intended as a navigation aid while reading the RTL;
+the control priorities and cycle contracts in this document remain normative.
+
 ## 1. Control model and invariants
 
 The core is single-hart, single-issue, and in order. Instructions may be

@@ -148,6 +148,7 @@ The committed visual evidence is routed through its owning document:
 
 | Evidence | Owning document |
 |---|---|
+| Annotated five-stage datapath | [Architecture](architecture.md), [Pipeline and control](pipeline-control.md) |
 | SoC memory-map diagram | [Architecture](architecture.md) |
 | Public regression and ACT4 logs | [Verification](verification.md) |
 | FreeRTOS Verilator and Questa runs | [Verification](verification.md), [Hardware validation](hardware-validation.md) |

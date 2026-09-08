@@ -228,6 +228,40 @@ creating accidental dependencies or side effects.
 | MEM | Drive the LSU, wait for data responses, format load results, and attach load/store faults |
 | WB | Commit GPR/CSR state, take precise traps, increment `minstret`, and emit the architectural trace |
 
+<p align="center">
+  <a href="images/pipeline_datapath.jpg">
+    <img src="images/pipeline_datapath.jpg" alt="Annotated RV32IM five-stage logical datapath showing pipeline registers, forwarding, hazards, control, CSR, LSU, and writeback" width="1200">
+  </a>
+</p>
+
+<p align="center"><em>Annotated logical datapath of the implemented core. The
+view connects the stage responsibilities above to the four packet boundaries,
+forwarding muxes, centralized pipeline control, CSR path, LSU, and writeback
+selection. It is a design-level aid; the RTL and generated Vivado reports remain
+authoritative for exact connectivity and implementation.</em></p>
+
+### Datapath diagram legend
+
+Bundled signal groups are annotated `[n]`. Each expands to the individual wires below. These are drawing bundles for readability — the RTL remains authoritative.
+
+- **[1] stall** — Pipeline Control inputs requesting a hold/bubble: `load_use_i`, `csr_dep_i`, `irq_state_wait_i`, `ex_wait_i`, `mem_wait_i`
+- **[2] trap** — exception/trap sources into Pipeline Control: `id_exception_i`, `id_interrupt_i`, `ex_exception_i`, `mem_exception_i`, `wb_trap_i`
+- **[3] control_redirect** — EX branch/JAL/JALR/MRET redirect: `control_redirect.valid`, `control_redirect.target` (asserted only when `ex_fire && is_control && control_taken && !ex_mem_d.exc.valid`)
+- **[4] ID_EX** — Hazard Unit producer read from the EX packet (`id_ex_q`): `rd`, `rs1`, `ctrl.mem_cmd`, `ctrl.reg_write`, `ctrl.csr_cmd`, `insn[31:20]`, `valid`, `exc.valid`
+- **[5] EX_MEM** — Hazard Unit producer read from the MEM packet (`ex_mem_q`): `csr_write`, `csr_addr`, `valid`, `exc.valid`
+- **[6] CSR commit** — WB → CSRFile commit: `commit_write_i` ← `wb_csr_write`, `commit_waddr_i` ← `mem_wb_q.csr_addr`, `commit_wdata_i` ← `mem_wb_q.csr_wdata`, `retire_i` ← `wb_retire`, `mret_commit_i` ← `wb_mret_commit`
+- **[7] trap** — trap context WB → CSRFile written on commit: `trap_valid_i` ← `wb_trap`, `trap_pc_i` ← `mem_wb_q.pc`, `trap_cause_i` ← `mem_wb_q.exc.cause`, `trap_tval_i` ← `mem_wb_q.exc.tval`, `trap_is_interrupt_i` ← `mem_wb_q.exc.is_interrupt`
+- **[8] RegFile commit** — WB → RegFile (ID): `wb_we_i` ← `wb_reg_write` (= `wb_retire && mem_wb_q.reg_write && (mem_wb_q.rd != 5'd0)`), `wb_rd_i` ← `mem_wb_q.rd`, `wb_data_i` ← `mem_wb_q.wb_data`
+- **[9] Control Signal (EX/MEM)** — selected fields carried EX → MEM in the packed `ex_mem_t` packet and drawn as separate wires: `reg_write`, `wb_sel`, `mem_cmd`, `mem_size`, `load_unsigned`, `csr_addr`, `csr_write`, `csr_wdata`, `csr_old`, `is_mret`, `control`, `control_taken`, `control_target`
+- **[10] Control Signal (MEM/WB)** — selected fields carried MEM → WB in the packed `mem_wb_t` packet and drawn as separate wires: `rd`, `reg_write`, `csr_write`, `csr_addr`, `csr_wdata`, `is_mret`, `control`, `control_taken`, `control_target`, `mem_write`, `mem_addr`, `mem_wstrb`, `mem_wdata`
+
+**Notes**
+- `ctrl` at the ID/EX boundary is a real packed `decode_ctrl_t` member of `id_ex_t`; `[9]` and `[10]` are selected fields of packed pipeline packets, drawn individually for clarity.
+- **IRQ inject @ ID/EX**: when `id_interrupt_candidate` is set, `id_ex_d` replaces the `id_ex_decoded` packet with a synthetic machine-timer-interrupt exception (PC preserved for replay via `mepc`). `mtimer_irq_eligible` is driven by CSRFile's post-commit eligibility, `csr_mtimer_irq_eligible_after_commit`, derived from `mip_value[MINT_MTIP_BIT] && mie_d[MINT_MTIP_BIT] && mstatus_d[MSTATUS_MIE_BIT]`.
+- `mtip` is the SoC-level signal driven by `rv32_mtimer.mtip_o` and connected to `rv32_core.mtip_i`.
+- The WB stage has no mux: `mem_wb_d.wb_data` is selected while constructing the MEM/WB packet from `WB_EX_RESULT`, `WB_PC4`, or `WB_CSR` for non-memory operations, and from `lsu_load_data` for a completed `MEM_LOAD`.
+- **D-TCM / I-TCM** are the logical data/instruction views of the SoC's unified dual-port `rv32_tcm`, not caches or storage instantiated inside `rv32_core`. The core connects through the `dmem_m`/`imem_m` ready/valid request-response interfaces.
+
 The core is in order from fetch through commit. There is no reorder buffer,
 scoreboard, speculative state checkpoint, or out-of-order completion path.
 Multicycle EX and delayed MEM operations hold the owning pipeline packet until

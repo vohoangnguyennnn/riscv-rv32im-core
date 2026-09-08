@@ -61,7 +61,14 @@ reviewed warnings, and evidence boundaries are recorded in the
 | MDU | Iterative multiply/divide unit with architectural corner-case handling |
 | Observability | Retirement trace, trap trace, and diagnostic counters |
 
-![Five-stage IF-ID-EX-MEM-WB stage diagram with interstage hazard markers](docs/images/pipeline-diagram.png)
+<p align="center">
+  <a href="docs/images/pipeline_datapath.jpg">
+    <img src="docs/images/pipeline_datapath.jpg" alt="Annotated RV32IM five-stage datapath with pipeline boundaries, forwarding, hazard, CSR, LSU, and writeback paths" width="1100">
+  </a>
+</p>
+
+<p align="center"><em>Annotated logical datapath of the implemented five-stage
+core. Select the image to inspect the full-resolution signal flow.</em></p>
 
 Pipeline control is centralized around architectural validity:
 
