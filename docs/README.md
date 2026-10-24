@@ -60,8 +60,8 @@ and verification result from being mistaken for one another.
 | [Performance](performance.md) | **How does the core behave across directed workloads?** Complete-run instruction counts, cycles, CPI/IPC, and stall diagnostics |
 | [CoreMark](coremark.md) | **What is the measured CoreMark result?** Source provenance, build configuration, CRC validation, CoreMark/MHz, CPI/IPC, and bottleneck counters |
 | [FPGA implementation](fpga.md) | **How is the design realized and observed on hardware?** Board boundary, reset, TCM initialization, XDC, Vivado flow, implementation results, bring-up, and the public hardware-evidence boundary |
-| [Hardware validation](hardware-validation.md) | **What evidence is currently supported?** Functional and performance records, post-route FreeRTOS implementation, board observation, artifact hashes, and the boundary between release-candidate and release evidence |
-| [Release checklist](release-checklist.md) | **What remains before publishing?** Clean-source, implementation, artifact, board, and GitHub release gates |
+| [Hardware validation](hardware-validation.md) | **What evidence is currently supported?** Functional and performance records, post-route FreeRTOS implementation, board observation, artifact hashes, and the published `v1.0.0` release package |
+| [Release checklist](release-checklist.md) | **How is a release published?** Clean-source, implementation, artifact, board, and GitHub release gates, closed for `v1.0.0` |
 | [Waveform debug](waveform-debug.md) | **How are cycle-level failures inspected?** Questa commands, curated signal groups, full-core waveform reading, capture procedure, and evidence policy |
 
 ## 3. Requirement-to-evidence flow
@@ -90,7 +90,7 @@ Useful cross-document review points are:
 | Redirect and precise-trap ordering | [Pipeline §§5–7](pipeline-control.md#5-control-transfer-recovery) | [Verification §§6–7](verification.md#6-integration-verification) |
 | Memory map and completion mailbox | [Software §§4–7](software.md#4-memory-and-linker-contract) | [Verification §7.1](verification.md#71-bare-metal-programs) |
 | MTIP, timer, UART, GPIO, and FreeRTOS | [Architecture §§6–7](architecture.md#6-memory-architecture), [Software §5](software.md#5-freertos-profile) | [Verification §§5.2–7.1](verification.md#52-pipeline-and-soc-invariants) |
-| FPGA timing and board behavior | [FPGA §§8–10](fpga.md#8-latest-supplied-implementation-result) | [Verification §10](verification.md#10-sign-off-policy) |
+| FPGA timing and board behavior | [FPGA §§8–10](fpga.md#8-released-implementation-result-v100) | [Verification §10](verification.md#10-sign-off-policy) |
 
 Waveforms are supporting debug evidence, not the pass/fail oracle. Simulation,
 architectural regression, routed timing, estimated power, and physical-board
