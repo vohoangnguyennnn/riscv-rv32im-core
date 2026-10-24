@@ -21,13 +21,14 @@ Detailed contracts remain in [Architecture](architecture.md),
 | Bitstream generation and artifact pairing | PASS; firmware and bitstream are hash-identified |
 | Physical FreeRTOS bring-up | PASS recorded for board boot, UART echo, GPIO, and status outputs |
 | Exact clean-package bitstream `94603524...` deployed on the target board | **PASS** |
+| Tagged public release with packaged artifacts | **PUBLISHED** as `v1.0.0` |
 
 The current implementation package uses `TCM_INIT_FILE=freertos_demo.mem`,
 contains all ten constrained top-level ports, and was exported from clean
 implementation commit `fc57a72`. The exact manifest-identified bitstream was
-programmed and passed the documented FreeRTOS board checks. The remaining
-`v1.0.0` work is repository/release publication rather than hardware
-validation.
+programmed and passed the documented FreeRTOS board checks. The bitstream,
+firmware, Vivado evidence archive, manifest, and checksums are published in the
+[`v1.0.0` release](https://github.com/vohoangnguyennnn/riscv-rv32im-core/releases/tag/v1.0.0).
 
 This project does not claim official RISC-V certification, an EEMBC-certified
 CoreMark submission, FPGA Fmax, measured board power, production PVT closure,
@@ -333,9 +334,12 @@ are unchanged.
 - [x] The Vivado DRC and methodology warnings are classified and documented.
 - [x] The package was exported from clean implementation commit `fc57a72`.
 - [x] The exact clean-package bitstream passed UART/GPIO/PASS/reset board checks.
-- [ ] Commit the complete release source and documentation so the tree is clean.
-- [ ] Tag and publish `v1.0.0` with the packaged artifacts.
+- [x] Commit the complete release source and documentation so the tree is clean.
+- [x] Tag and publish `v1.0.0` with the packaged artifacts.
 
-Hardware validation is complete. Until the final two publication items close,
-the accurate status is **validated release candidate**, not an immutable tagged
-release.
+Hardware validation and publication are complete. The
+[`v1.0.0` release](https://github.com/vohoangnguyennnn/riscv-rv32im-core/releases/tag/v1.0.0) is tagged at commit `c8c4078`, which differs from
+implementation commit `fc57a72` only in documentation and benchmark-report-output
+packaging. Any later change to RTL, software, XDC, Clocking Wizard
+configuration, target part, or FPGA source list requires a new implementation
+package and board retest before it can claim this evidence.
