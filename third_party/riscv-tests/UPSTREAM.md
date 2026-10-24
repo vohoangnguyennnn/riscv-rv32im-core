@@ -1,7 +1,10 @@
 # Pinned riscv-tests snapshot
 
-This directory vendors the RV32I/RV32M assembly sources and scalar test macros
-needed by this project's offline ISA regression.
+This directory vendors the RV32I/RV32M wrapper sources and scalar test macros
+used by this project's ISA regression. The wrappers include instruction bodies
+from the upstream `rv64ui` and `rv64um` directories, which are not committed:
+restore both directories from the commit below into `isa/` before running
+`make isa` (CI does the same, and both paths are ignored by Git).
 
 - Upstream: <https://github.com/riscv-software-src/riscv-tests>
 - Commit: `447a5fcb8253627ddb5f6a226f64e43463afcdd5`
