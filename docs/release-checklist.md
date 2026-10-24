@@ -1,7 +1,9 @@
 # Release Checklist
 
-This checklist freezes the RV32IM repository around the FreeRTOS FPGA profile.
-The authoritative evidence record is [Hardware validation](hardware-validation.md).
+This checklist records the gates closed for the published
+[`v1.0.0` release](https://github.com/vohoangnguyennnn/riscv-rv32im-core/releases/tag/v1.0.0) of the FreeRTOS FPGA profile and serves as the
+template for later releases. The authoritative evidence record is
+[Hardware validation](hardware-validation.md).
 
 ## Completed engineering gates
 
@@ -15,16 +17,23 @@ The authoritative evidence record is [Hardware validation](hardware-validation.m
 - [x] Firmware, reports, and bitstream are paired with SHA-256 hashes.
 - [x] FreeRTOS boot, UART echo, GPIO, PASS/DONE, and reset behavior have been observed on board.
 
-## Required before public `v1.0.0`
+## Publication gates for `v1.0.0`
 
-- [ ] Review and commit all intended source, third-party pinning, documentation, and CI changes.
-- [ ] Confirm `git status --short` is empty at the release commit.
+All publication gates closed on 2026-09-03.
+
+- [x] Review and commit all intended source, third-party pinning, documentation, and CI changes.
+- [x] Confirm `git status --short` is empty at the release commit.
 - [x] Run the full release regression and save its console log.
 - [x] Rebuild the 250 ms board FreeRTOS image from clean implementation commit `fc57a72`.
 - [x] Re-run synthesis, implementation, and the FreeRTOS release export from that commit.
 - [x] Program the exact exported `fpga_top.bit` and repeat the UART/GPIO/PASS/reset checks.
 - [x] Record the implementation commit and replacement hashes in `hardware-validation.md`.
-- [ ] Tag `v1.0.0` and attach the Vivado evidence directory or a compressed copy to the GitHub release.
+- [x] Tag `v1.0.0` and attach the Vivado evidence directory or a compressed copy to the GitHub release.
+
+The `v1.0.0` tag points at commit `c8c4078`. Relative to implementation commit
+`fc57a72`, it adds only documentation and benchmark-report-output packaging
+changes; RTL, firmware, XDC, Clocking Wizard configuration, and the FPGA source
+list are unchanged.
 
 ## Final commands
 
