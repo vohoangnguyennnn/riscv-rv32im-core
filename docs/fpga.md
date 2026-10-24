@@ -2,8 +2,8 @@
 
 This document defines how the RV32IM SoC is implemented and brought up on the
 MicroPhase A7-Lite R1.1. The current wrapper and XDC define the intended board
-boundary; the latest supplied routed report covers the `freertos_demo.mem`
-implementation at 75 MHz. The dated provenance and evidence boundary are
+boundary; the routed implementation released as `v1.0.0` covers the
+`freertos_demo.mem` image at 75 MHz. The dated provenance and evidence boundary are
 recorded in [Hardware validation](hardware-validation.md).
 
 The programmer-visible processor contract is defined in
@@ -366,6 +366,14 @@ make fpga
 | `tb_reset_sync` | Reset synchronizer | Power-up reset, asynchronous event capture, staged synchronous release, runtime reset | 15 checks PASS |
 | `tb_soc_tcm_top` | Core + TCM + MMIO fabric + mailbox | TCM/timer/UART/GPIO access, response ownership, retirement-qualified sticky PASS/FAIL | 112 checks PASS |
 
+```text
+[RUN]   tb_reset_sync
+tb_reset_sync: PASS (15 checks)
+[RUN]   tb_soc_tcm_top
+tb_soc_tcm_top: PASS (112 checks)
+[PASS] FPGA-support reset and SoC/TCM simulations completed
+```
+
 The vendor-specific `fpga_top` and Clocking Wizard are intentionally excluded
 from the portable RTL regression. Vivado synthesis, implementation, timing,
 bitstream generation, and board bring-up validate that deployment layer.
@@ -383,12 +391,13 @@ separate Sail-backed architectural gate. These simulation results establish
 functional confidence but do not replace implementation or physical-board
 evidence.
 
-## 8. Latest supplied implementation result
+## 8. Released implementation result (v1.0.0)
 
 The validated package, `Report_vivado/freertos/20260903_103705/`, was generated
 on 2026-09-03 with Vivado 2024.1 build 5076996 for `xc7a35tfgg484-2`. It records
 clean implementation commit `fc57a72`, top `fpga_top`, and
-`TCM_INIT_FILE=freertos_demo.mem SOC_CLK_FREQ_HZ=75000000`.
+`TCM_INIT_FILE=freertos_demo.mem SOC_CLK_FREQ_HZ=75000000`. Its bitstream and
+evidence archive are attached to the [`v1.0.0` release](https://github.com/vohoangnguyennnn/riscv-rv32im-core/releases/tag/v1.0.0).
 
 | Gate | Reviewed result |
 |---|---|
@@ -403,19 +412,6 @@ clean implementation commit `fc57a72`, top `fpga_top`, and
 
 The small positive margin supports this implemented 75 MHz point only; it is
 not an Fmax result.
-
-```text
-[RUN]   tb_reset_sync
-tb_reset_sync: PASS (15 checks)
-[RUN]   tb_soc_tcm_top
-tb_soc_tcm_top: PASS (112 checks)
-[PASS] FPGA-support reset and SoC/TCM simulations completed
-```
-
-<p align="center"><em>Reproduced <code>make fpga</code> terminal result. The
-previously committed screenshot for this section predated the SoC/TCM
-testbench growing to 112 checks and has been replaced with this current,
-reproducible transcript rather than a stale image.</em></p>
 
 <p align="center">
   <a href="images/timing_report.png">
