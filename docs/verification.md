@@ -219,7 +219,14 @@ counts within the documented one-cycle harness difference.</em></p>
 
 The minimal source snapshot is pinned at commit
 `447a5fcb8253627ddb5f6a226f64e43463afcdd5`. It runs 40 in-scope
-`rv32ui` and all eight `rv32um` programs. `fence_i`
+`rv32ui` and all eight `rv32um` programs.
+
+The vendored RV32 wrappers include their instruction bodies from the upstream
+`rv64ui` and `rv64um` directories, which are not committed. Before running
+`make isa` or `make test` from a fresh checkout, restore those two directories
+from the same pinned commit into `third_party/riscv-tests/isa/`; the root
+[README](../README.md#run-the-public-regression) lists the commands, CI performs
+the same step, and both directories are ignored by Git. `fence_i`
 is excluded because Zifencei is outside scope; `ma_data` expects
 successful misaligned accesses while this core traps them. These are declared
 scope exclusions, not passing waivers.
@@ -303,8 +310,3 @@ For a change that affects architectural or SoC behavior:
 - constrained-random collision testing and functional/code coverage closure;
 - formal proof of selected control and memory-protocol properties;
 - complete privileged-architecture conformance beyond the implemented subset.
-
-The current FPGA result is artifact-hash identified but was captured from the
-board-integration worktree rather than a clean release tag. Closing that
-source-to-bitstream provenance is a release-packaging task; it does not
-invalidate the recorded functional, timing, or board observations.
