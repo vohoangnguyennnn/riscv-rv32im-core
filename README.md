@@ -167,9 +167,9 @@ Details: [Software](docs/software.md).
 | Integration | 7 benches: forwarding, waits, traps, MTIP, control recovery, SoC | `make integration` | ✓ |
 | Software | 2 bare-metal programs and the FreeRTOS SoC demo | `make baremetal freertos` | ✓ |
 | ISA | 48 pinned `riscv-tests` RV32I/RV32M programs | `make isa` | ✓ |
-| Assertions | Memory-protocol, retirement, and interrupt SVA | `make assertions` | |
-| Independent ISA | 47 ACT4 4.0.0 RV32I/RV32M tests against Sail | `make act4` | |
-| Cross-simulator | Curated RTL portfolio and FreeRTOS on Questa | `make questa-check` | |
+| Assertions | Memory-protocol, retirement, and interrupt SVA | `make assertions` | ✓ |
+| Independent ISA | 47 ACT4 4.0.0 RV32I/RV32M tests against Sail | `make act4` | ✓ |
+| Cross-simulator | Curated RTL portfolio and FreeRTOS on Questa | `make questa-check` | ✓ |
 
 CI runs `make test` on every push and pull request, and runs ACT4 when the
 RTL, assertions, ACT4 configuration, or Makefile change. Pass/fail comes from
