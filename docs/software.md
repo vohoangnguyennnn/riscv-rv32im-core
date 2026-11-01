@@ -332,6 +332,7 @@ make questa-freertos-run
 make fpga-freertos-images
 
 # Everything in the public CI gate
+make isa-fetch  # One-time pinned source bootstrap; requires network access
 make -j"$(nproc)" test
 ```
 

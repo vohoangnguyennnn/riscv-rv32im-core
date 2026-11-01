@@ -79,6 +79,11 @@ check-tools:
 	@command -v $(PYTHON) >/dev/null 2>&1 || { echo "error: $(PYTHON) not found" >&2; exit 127; }
 
 check-manifest:
+	@for source_dir in rv64ui rv64um; do \
+		test -d "$(UPSTREAM)/isa/$$source_dir" || { \
+			echo "error: missing riscv-tests $$source_dir; run 'make isa-fetch' from the repository root" >&2; exit 1; \
+		}; \
+	done
 	@for test_name in $(RV32UI_TESTS) $(RV32UI_OUT_OF_SCOPE_TESTS); do \
 		test -f "$(UPSTREAM)/isa/rv32ui/$$test_name.S" || { \
 			echo "error: rv32ui manifest source $$test_name.S is missing" >&2; exit 1; \

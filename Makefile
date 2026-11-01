@@ -280,7 +280,7 @@ ACT4_SIM := $(BUILD_DIR)/tb_baremetal_act4/Vtb_baremetal_act4
 
 .DEFAULT_GOAL := test
 
-.PHONY: all test rtl-check-tools lint unit integration gate4 assertions fpga baremetal software-images \
+.PHONY: all test rtl-check-tools lint unit integration gate4 assertions fpga baremetal software-images isa-fetch \
 	freertos freertos-images fpga-freertos-images \
 	benchmark benchmark-images coremark coremark-images \
 	isa isa-images isa-rv32ui-arithmetic isa-rv32ui-control \
@@ -388,6 +388,9 @@ coremark: coremark-images $(BAREMETAL_SIM)
 		--max-cycles $(COREMARK_MAX_CYCLES) \
 		--max-trace-events $(COREMARK_MAX_TRACE_EVENTS) \
 		--output "$(GENERATED_REPORT_DIR)/coremark.md"
+
+isa-fetch:
+	@$(PYTHON) tools/fetch_riscv_tests.py
 
 isa-images:
 	@$(MAKE) -C sw/isa BUILD_DIR=$(ISA_BUILD_DIR) all
