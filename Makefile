@@ -140,16 +140,18 @@ GATE4_TESTS := \
 ASSERTION_TESTS := \
 	tb_pipeline_memory_wait \
 	tb_core_control_flow \
-	tb_timer_interrupt_core
+	tb_timer_interrupt_core \
+	tb_soc_reset
 
 INTEGRATION_TESTS := \
 	tb_rv32_core \
 	tb_csr_core \
 	tb_timer_interrupt_core \
 	tb_soc_tcm_top \
+	tb_soc_reset \
 	$(GATE4_TESTS)
 
-FPGA_TESTS := tb_reset_sync tb_soc_tcm_top
+FPGA_TESTS := tb_reset_sync tb_soc_tcm_top tb_soc_reset
 
 ALL_TESTS := $(UNIT_TESTS) $(INTEGRATION_TESTS)
 SOFTWARE_INTEGRATION_TESTS := tb_freertos_soc
@@ -236,6 +238,11 @@ tb_soc_tcm_top_SRCS := \
 	$(SOC_SOURCES) \
 	$(ASSERTION_SOURCES) \
 	tb/integration/tb_soc_tcm_top.sv
+tb_soc_reset_SRCS := \
+	$(SOC_SOURCES) \
+	$(ASSERTION_SOURCES) \
+	tb/common/rv32_tb_pkg.sv \
+	tb/integration/tb_soc_reset.sv
 tb_pipeline_forwarding_SRCS := \
 	$(TCM_SOURCES) \
 	$(ASSERTION_SOURCES) \
@@ -415,7 +422,7 @@ list:
 help:
 	@echo "RV32IM RTL regression targets"
 	@echo "  make test         Run lint and every RTL/software/ISA regression"
-	@echo "  make lint         Lint the core, TCM, SoC, reset, and FPGA top"
+	@echo "  make lint         Lint portable core, SoC, peripherals, and reset synchronizer"
 	@echo "  make unit         Run all unit tests"
 	@echo "  make integration  Run all core integration tests"
 	@echo "  make gate4        Run the Gate 4 directed acceptance suite"

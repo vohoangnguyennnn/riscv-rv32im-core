@@ -442,8 +442,8 @@ module tb_rv32_mem_demux;
     clear_responses();
     check_bit(dut.pending_q, 1'b0, "waiting GPIO response drains");
 
-    // Reset cancels ownership and prevents a late response from becoming a
-    // post-reset completion.
+    // Reset blocks new requests but forwards an already available response
+    // for drain. The reset edge then clears ownership, preventing replay.
     @(negedge clk);
     drive_request(TIMER_BASE, 1'b0, 32'b0, 4'b0000);
     @(posedge clk);
@@ -455,7 +455,9 @@ module tb_rv32_mem_demux;
     set_response(TARGET_TIMER, 32'hffff_0000, 1'b0);
     #1;
     check_bit(core.req_ready, 1'b0, "reset blocks request");
-    check_bit(core.rsp_valid, 1'b0, "reset hides pending response");
+    check_bit(core.rsp_valid, 1'b1, "reset exposes pending response for drain");
+    check_word(core.rsp_rdata, 32'hffff_0000, "reset drain preserves response data");
+    check_bit(core.rsp_err, 1'b0, "reset drain preserves response status");
     check_all_targets_disabled("reset disables every target");
     @(posedge clk);
     #1;

@@ -26,7 +26,7 @@ provenance and claim boundaries are recorded in
 |---|---|
 | Core | 5-stage IF/ID/EX/MEM/WB, single-hart, single-issue, in-order RV32IM |
 | Privileged support | Machine-mode CSR subset, precise synchronous traps, machine-timer interrupt, `ECALL`/`MRET` |
-| RTL regression | Strict lint; 21/21 unit, 7/7 directed integration, and FreeRTOS SoC simulations pass |
+| RTL regression | Current Verilator gate: strict lint; 21/21 unit, 8/8 directed integration, and FreeRTOS SoC simulations pass |
 | Software | 2/2 bare-metal programs and the FreeRTOS V11.3.0 demo pass on Verilator and Questa |
 | ISA suites | 40 RV32I + 8 RV32M pinned `riscv-tests`; 39 RV32I + 8 RV32M ACT4 4.0.0 (Sail-backed) |
 | FPGA target | MicroPhase A7-Lite R1.1, AMD/Xilinx Artix-7 `xc7a35tfgg484-2` |
@@ -81,7 +81,7 @@ cp -R /tmp/riscv-tests/isa/rv64ui /tmp/riscv-tests/isa/rv64um third_party/riscv-
 make -j"$(nproc)" test
 ```
 
-`make test` runs strict lint, 29 RTL simulations (21 unit, 7 directed
+`make test` runs strict lint, 30 RTL simulations (21 unit, 8 directed
 integration, 1 FreeRTOS SoC), two bare-metal programs, and 48 pinned ISA
 programs. Generated models and images are written below `/tmp/rv32im-core-*`.
 
@@ -91,6 +91,7 @@ programs. Generated models and images are written below `/tmp/rv32im-core-*`.
 |---|---|
 | `make lint` / `make unit` / `make integration` | Individual stages of the public gate |
 | `make assertions` | Protocol, retirement, and interrupt SVA stress benches |
+| `make tb_soc_reset` | 12 SoC reset scenarios, including accepted memory/MMIO requests and UART backpressure |
 | `make baremetal` / `make freertos` / `make isa` | Software and ISA stages of the public gate |
 | `make fpga` | **Simulation only:** reset synchronizer and SoC/TCM deployment-support tests |
 | `make fpga-freertos-images` | Build the 75 MHz, 250 ms-blink FreeRTOS board image |

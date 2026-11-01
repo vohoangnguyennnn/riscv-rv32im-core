@@ -306,8 +306,10 @@ Conditional branches, `JAL`, `JALR`, and `MRET` resolve in EX using forwarded
 source operands. Branch and `JAL` targets are PC-relative. `JALR` computes
 `rs1 + imm` and clears bit 0 before the `IALIGN=32` alignment check.
 
-A taken transfer flushes the younger IF/ID and ID/EX packets. With the default
-one-cycle TCM this produces two control bubbles. A not-taken conditional branch
+A taken transfer captures the control instruction from ID/EX into EX/MEM,
+clears its old ID/EX slot, and squashes younger IF/ID and fetch work. Recovery
+latency depends on fetch-response timing; the number of flushed boundaries is
+not a universal branch-penalty count. A not-taken conditional branch
 does not redirect or flush. A taken target with either low address bit set
 raises an instruction-address-misaligned exception on the control-transfer
 instruction; no redirect is issued.
@@ -490,6 +492,12 @@ the protocol bookkeeping needed to discard that response and suppresses new
 issue until the drain completes. A replacement memory system must therefore
 preserve exactly one response for every accepted request across core reset.
 
+The current SoC data targets all respond one cycle after acceptance. Its demux
+blocks new requests during reset but forwards an already-owned response, so
+the LSU can drain it at the reset edge before demux ownership is cleared.
+Attaching a longer-latency slave requires retaining ownership across reset
+until that response is drained; clearing ownership alone would lose it.
+
 At the FPGA boundary, `reset_sync` converts the combined clock-boundary reset,
 user SoC reset, and clock-lock indication into the functional SoC reset. Only
 its synchronization pipeline captures the active-low event asynchronously;
@@ -652,7 +660,7 @@ they are not workload benchmark results.
 | Peripheral request | Registered response; UART TX may backpressure while busy |
 | Immediate load consumer | One interlock bubble with one-cycle TCM |
 | Not-taken conditional branch | No redirect bubble |
-| Taken branch, `JAL`, `JALR`, or `MRET` | Two younger packets flushed |
+| Taken branch, `JAL`, `JALR`, or `MRET` | Control advances to EX/MEM; younger IF/ID and fetch work is squashed |
 | Multiply | Registered two-stage request/response operation |
 | Normal divide/remainder | 32 restoring iterations |
 | Divide-by-zero, signed overflow, or smaller dividend magnitude | Local result without iterative run |

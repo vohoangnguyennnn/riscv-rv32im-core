@@ -168,8 +168,9 @@ module rv32_mem_demux #(
       endcase
     end
 
-    // Hide responses during reset or with no outstanding transaction.
-    core_s.rsp_valid = !rst_i && pending_q && pending_rsp_valid;
+    // Forward an owned response even during reset so the master can drain it
+    // at the reset edge. New requests remain blocked by issue_allowed above.
+    core_s.rsp_valid = pending_q && pending_rsp_valid;
     core_s.rsp_rdata = core_s.rsp_valid ? pending_rsp_rdata : 32'b0;
     core_s.rsp_err   = core_s.rsp_valid ? pending_rsp_err   : 1'b0;
   end
@@ -179,6 +180,9 @@ module rv32_mem_demux #(
 
   always_ff @(posedge clk_i) begin
     if (rst_i) begin
+      // The integrated slaves respond one cycle after acceptance, so any
+      // pending response is visible to the master before this edge clears
+      // ownership. Slaves with longer latency require retained ownership.
       pending_q        <= 1'b0;
       pending_target_q <= TARGET_TCM;
     end else begin

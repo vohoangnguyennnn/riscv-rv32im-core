@@ -12,6 +12,7 @@ tb/integration/tb_rv32_core.sv
 tb/integration/tb_csr_core.sv
 tb/integration/tb_timer_interrupt_core.sv
 tb/integration/tb_soc_tcm_top.sv
+tb/integration/tb_soc_reset.sv
 tb/integration/tb_pipeline_forwarding.sv
 tb/integration/tb_pipeline_memory_wait.sv
 tb/integration/tb_core_control_flow.sv

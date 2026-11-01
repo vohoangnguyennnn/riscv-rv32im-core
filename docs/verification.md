@@ -49,16 +49,16 @@ debug aid rather than the PASS oracle.</em></p>
 |---|---|---|
 | Strict lint | Synthesizable core, SoC blocks, and reset wrapper | `make lint` |
 | Unit RTL | Leaf datapath, stages, controller, memory endpoints, and peripherals | 21 self-checking benches |
-| Directed integration | Complete core, precise traps/MTIP, waits, forwarding, control recovery, and SoC | 7 self-checking benches |
-| Bound assertions | Memory protocol, retirement, and interrupt invariants in full-core simulations | `make assertions` focuses 3 stress benches |
+| Directed integration | Complete core, precise traps/MTIP, waits, forwarding, control recovery, and SoC reset | 8 self-checking benches |
+| Bound assertions | Memory protocol, retirement, and interrupt invariants in full-core simulations | `make assertions` focuses 4 stress benches |
 | FreeRTOS SoC | Production SoC hierarchy, scheduler, timer, UART, GPIO, and mailbox | 1 end-to-end bench |
 | Bare-metal software | Production core/TCM plus startup, runtime, trap entry, and linker script | 2 programs |
 | Pinned `riscv-tests` | Full pipeline with retirement-qualified completion | 40 RV32I + 8 RV32M |
 | ACT4 4.0.0 + Sail | Generated self-checking I/M ELFs against independent signatures | 39 RV32I + 8 RV32M |
 | Questa cross-check | Curated RTL portfolio and FreeRTOS execution | Local licensed gate |
 
-`make test` is the public open-source gate: strict lint, 29 RTL
-simulations (21 unit, 7 directed integration, and one FreeRTOS SoC), two
+`make test` is the public open-source gate: strict lint, 30 RTL
+simulations (21 unit, 8 directed integration, and one FreeRTOS SoC), two
 bare-metal programs, and 48 pinned ISA programs. ACT4 is separate because its
 generator, Sail model, solver, and toolchain bootstrap are heavier external
 dependencies.
@@ -136,7 +136,7 @@ tests; they do not constitute formal proof or functional/code coverage closure.
 | CSR stalls are limited to conflicting architectural state | `tb_hazard_unit`, `tb_csr_core` |
 | Requests remain stable under backpressure | `tb_if_stage`, `tb_lsu`, `tb_pipeline_memory_wait`, protocol assertions |
 | Delayed responses cannot duplicate retirement | `tb_pipeline_memory_wait`, retirement assertions |
-| Redirected, killed, or pre-reset responses are drained | IF and LSU unit tests, control-flow scenarios, protocol assertions |
+| Redirected, killed, or pre-reset responses are drained | IF and LSU unit tests, `tb_soc_reset`, control-flow scenarios, protocol assertions |
 | Older waits, faults, and traps defeat younger redirects | `tb_pipeline_ctrl`, `tb_core_control_flow` |
 | MTIP waits only for unresolved older interrupt-state writers | `tb_timer_interrupt_core`, interrupt assertions |
 | Enabling/disabling CSR commits affect MTIP without a shadow instruction | `tb_timer_interrupt_core`, interrupt assertions |
@@ -167,6 +167,7 @@ percentages.
 | `tb_csr_core` | Zicsr dependencies, counters, precise traps, and return |
 | `tb_timer_interrupt_core` | MTIP arbitration, drain, CSR-writer interlock, and post-commit enable/disable |
 | `tb_soc_tcm_top` | Core, TCM, timer/peripheral fabric, and completion boundary |
+| `tb_soc_reset` | Bounded reboot after accepted TCM/timer/UART/GPIO loads/stores, UART request backpressure, and repeated idle resets |
 | `tb_pipeline_forwarding` | RAW matrix, forwarding priority, and load-use behavior |
 | `tb_pipeline_memory_wait` | Request backpressure, delayed response, global hold, and single retirement |
 | `tb_core_control_flow` | Branch/jump recovery, exception priority, trap drain, and `MRET` |
@@ -180,6 +181,22 @@ memory wait, held-operand refresh, redirect against wrong-path MDU/store,
 synchronous trap against pending MTIP, CSR enable/disable at commit, and
 backpressured or delayed memory responses. The result is judged at retirement
 or at the external interface after all older work has resolved.
+
+`make tb_soc_reset` runs 12 deterministic scenarios with the production SoC
+and bound core assertions. It includes a no-reset control run, reset after an
+accepted load and store at each of the four data targets, reset while a second
+UART TX store is unaccepted, and two repeated idle resets. Reset holds last
+one, four, or seven cycles. Each reboot jumps to a distinct instruction range
+and writes a different data value, detecting stale retirements and load data.
+Transaction waits and reboot completion have cycle deadlines; a global timeout
+also prevents a stalled test from hanging CI. Models are generated under
+`/tmp/rv32im-core-verilator-<uid>/tb_soc_reset/`; PASS/FAIL is printed to stdout.
+
+The integrated slaves return their response one cycle after request acceptance.
+The demux lets an owned response reach the LSU during reset, before the reset
+edge clears ownership. This test does not establish reset compatibility with
+an arbitrary delayed-response slave; such an integration must preserve pending
+ownership until the old response can be drained.
 
 The FreeRTOS bench boots the pinned image on the production 64 KiB SoC,
 decodes serial UART TX, drives UART RX, observes GPIO activity, classifies
@@ -254,7 +271,8 @@ disabled because the core implements only the documented M-mode subset.
 |---|---|
 | `make lint` | Strict lint of synthesizable boundaries |
 | `make unit` | Run all 21 unit tests |
-| `make integration` | Run all 7 directed integration tests |
+| `make integration` | Run all 8 directed integration tests |
+| `make tb_soc_reset` | Run the 12-scenario SoC reset/reboot regression |
 | `make assertions` | Focus protocol, retirement, and interrupt assertion stress |
 | `make baremetal` | Build and execute both freestanding programs |
 | `make freertos` | Verify source hashes, build, and run the FreeRTOS SoC demo |
