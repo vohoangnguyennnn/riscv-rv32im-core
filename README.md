@@ -88,6 +88,8 @@ programs. Generated models and images are written below `/tmp/rv32im-core-*`.
 Simulation assertions check the demux's one-cycle response assumption at reset
 and require an owned response to reach the master before ownership is cleared.
 See [Verification](docs/verification.md) for the intentional negative test.
+Divider unit tests and the bare-metal smoke program also check equal-magnitude
+and adjacent-magnitude division to guard the strict shortcut boundary.
 
 ### Other targets
 

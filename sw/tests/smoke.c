@@ -17,6 +17,51 @@ static uint32_t arithmetic_kernel(uint32_t lhs, uint32_t rhs)
   return (lhs * rhs) + lhs + rhs;
 }
 
+static void check_division_boundaries(void)
+{
+  static const struct {
+    uint32_t lhs;
+    uint32_t rhs;
+    uint32_t signed_quotient;
+    uint32_t unsigned_quotient;
+    uint32_t remainder;
+    uint32_t unsigned_remainder;
+  } vectors[] = {
+    { 7U, 7U, 1U, 1U, 0U, 0U },
+    { UINT32_C(0xfffffff9), 7U, UINT32_MAX, 613566755U, 0U, 4U },
+    { 7U, UINT32_C(0xfffffff9), UINT32_MAX, 0U, 0U, 7U },
+    { UINT32_C(0xfffffff9), UINT32_C(0xfffffff9), 1U, 1U, 0U, 0U },
+    { UINT32_C(0x80000000), UINT32_C(0x80000000), 1U, 1U, 0U, 0U },
+    { UINT32_MAX, UINT32_MAX, 1U, 1U, 0U, 0U },
+    { 6U, 7U, 0U, 0U, 6U, 6U },
+    { 7U, 6U, 1U, 1U, 1U, 1U }
+  };
+
+  for (size_t index = 0; index < sizeof(vectors) / sizeof(vectors[0]); index++) {
+    uint32_t quotient;
+    uint32_t remainder;
+    uint32_t unsigned_quotient;
+    uint32_t unsigned_remainder;
+
+    /* Explicit instructions prevent folding x/x or sharing DIV and REM.
+     * Early-clobber outputs preserve both inputs across the four instructions.
+     */
+    __asm__ volatile (
+      "div %0, %4, %5\n\t"
+      "rem %1, %4, %5\n\t"
+      "divu %2, %4, %5\n\t"
+      "remu %3, %4, %5"
+      : "=&r" (quotient), "=&r" (remainder),
+        "=&r" (unsigned_quotient), "=&r" (unsigned_remainder)
+      : "r" (vectors[index].lhs), "r" (vectors[index].rhs));
+
+    BM_CHECK(quotient == vectors[index].signed_quotient, 0x100U + index * 4U);
+    BM_CHECK(remainder == vectors[index].remainder, 0x101U + index * 4U);
+    BM_CHECK(unsigned_quotient == vectors[index].unsigned_quotient, 0x102U + index * 4U);
+    BM_CHECK(unsigned_remainder == vectors[index].unsigned_remainder, 0x103U + index * 4U);
+  }
+}
+
 int main(void)
 {
   volatile uint32_t divisor = initialized_words[0];
@@ -40,6 +85,7 @@ int main(void)
   BM_CHECK((initialized_words[3] % divisor) == 2U, UINT32_C(5));
   BM_CHECK((signed_lhs / signed_rhs) == -14, UINT32_C(6));
   BM_CHECK((signed_lhs % signed_rhs) == -2, UINT32_C(7));
+  check_division_boundaries();
 
   BM_CHECK(bytes[0] == UINT8_C(0x44), UINT32_C(8));
   BM_CHECK(bytes[1] == UINT8_C(0x33), UINT32_C(9));

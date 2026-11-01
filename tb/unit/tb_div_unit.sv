@@ -371,6 +371,26 @@ module tb_div_unit;
     check_signed_identity(32'hffff_fffb, 32'd13,        "small negative magnitude identity");
     check_unsigned_identity(32'd7,       32'd29,        "small unsigned magnitude identity");
 
+    // Shortcut boundary: equality must enter the divider, not the |lhs|<|rhs|
+    // path. Exercise all four operations on each bit-pattern pair, including
+    // signed equal magnitudes with opposite signs and adjacent magnitudes.
+    check_signed_identity(32'd7, 32'd7, "equal positive magnitudes");
+    check_unsigned_identity(32'd7, 32'd7, "equal positive bit patterns");
+    check_signed_identity(32'hffff_fff9, 32'd7, "equal magnitude negative/positive");
+    check_unsigned_identity(32'hffff_fff9, 32'd7, "unsigned negative/positive patterns");
+    check_signed_identity(32'd7, 32'hffff_fff9, "equal magnitude positive/negative");
+    check_unsigned_identity(32'd7, 32'hffff_fff9, "unsigned positive/negative patterns");
+    check_signed_identity(32'hffff_fff9, 32'hffff_fff9, "equal negative magnitudes");
+    check_unsigned_identity(32'hffff_fff9, 32'hffff_fff9, "equal negative bit patterns");
+    check_signed_identity(32'h8000_0000, 32'h8000_0000, "INT_MIN by INT_MIN");
+    check_unsigned_identity(32'h8000_0000, 32'h8000_0000, "equal high unsigned values");
+    check_signed_identity(32'hffff_ffff, 32'hffff_ffff, "negative one by negative one");
+    check_unsigned_identity(32'hffff_ffff, 32'hffff_ffff, "UINT_MAX by UINT_MAX");
+    check_signed_identity(32'd6, 32'd7, "below shortcut boundary");
+    check_unsigned_identity(32'd6, 32'd7, "unsigned below shortcut boundary");
+    check_signed_identity(32'd7, 32'd6, "above shortcut boundary");
+    check_unsigned_identity(32'd7, 32'd6, "unsigned above shortcut boundary");
+
     // Directed sign and rounding-toward-zero vectors.
     check_signed_identity(32'd7,         32'd3,         "positive by positive");
     check_signed_identity(32'hffff_fff9, 32'd3,         "negative by positive");

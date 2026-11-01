@@ -159,6 +159,13 @@ tests; they do not constitute formal proof or functional/code coverage closure.
 Printed deterministic check counts are stimulus-vector counts, not coverage
 percentages.
 
+Divider shortcut-boundary vectors cover all DIV/DIVU/REM/REMU operations on
+equal positive/negative magnitudes, INT_MIN/INT_MIN, UINT_MAX/UINT_MAX, and
+6/7 versus 7/6. The bare-metal `smoke` program executes the same bit-pattern
+pairs with explicit instructions and constant expected results, so equality
+cannot disappear through compiler folding. A `<` to `<=` shortcut mutation
+must fail both `make tb_div_unit` and `make baremetal-smoke`.
+
 ### 5.2 Pipeline and SoC invariants
 
 | Testbench | Acceptance responsibility |

@@ -359,6 +359,9 @@ These cases complete locally without entering the 32-iteration loop. Neither
 case generates an exception. The divider also bypasses the iterative loop when
 the dividend magnitude is smaller than the divisor magnitude, returning zero
 for division or the original dividend for remainder.
+The comparison is strictly less-than: equal nonzero magnitudes produce a
+signed quotient of +1 or -1 (unsigned +1) and zero remainder. Equality is not
+eligible for the small-magnitude shortcut.
 
 ## 6. Memory architecture
 
