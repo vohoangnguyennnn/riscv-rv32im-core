@@ -100,6 +100,7 @@ its value, while writes to read-only ID CSRs still trap.
 | `make lint` / `make unit` / `make integration` | Individual stages of the public gate |
 | `make assertions` | Protocol, retirement, and interrupt SVA stress benches |
 | `make tb_soc_reset` | 12 SoC reset scenarios, including accepted memory/MMIO requests and UART backpressure |
+| `make freertos-config-check` | Verify configuration changes rebuild FreeRTOS/BSP objects and unchanged builds do no compilation; included in `make test` |
 | `make baremetal` / `make freertos` / `make isa` | Software and ISA stages of the public gate |
 | `make fpga` | **Simulation only:** reset synchronizer and SoC/TCM deployment-support tests |
 | `make fpga-freertos-images` | Build the 75 MHz, 250 ms-blink FreeRTOS board image |

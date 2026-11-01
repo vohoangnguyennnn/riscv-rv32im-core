@@ -74,6 +74,20 @@ errors. All link warnings are fatal.
 
 Generated products are placed below `/tmp/rv32im-core-software-<uid>/`:
 
+FreeRTOS objects, including the BSP, depend on `freertos/config.stamp` inside
+the selected build directory. It records the effective compiler command,
+FreeRTOS preprocessor flags, project C flags, and kernel C flags. Changing
+`FREERTOS_CPU_CLOCK_HZ` or `FREERTOS_BLINK_PERIOD_MS` therefore rebuilds those
+objects. A content comparison adds the FORCE dependency only when configuration
+differs; the stamp recipe compares again before replacing the file. An unchanged
+build preserves stamp/object timestamps, and `make -n` schedules compilation
+only for an actual configuration change without modifying the stamp.
+
+`make freertos-config-check` at the repository root verifies configuration
+changes and subsequent no-op builds in a private temporary directory. It is
+also part of `make test`. The board-image target still uses its separate
+`BUILD_DIR` and `-B`; CoreMark rebuild rules are unchanged.
+
 | Artifact | Purpose |
 |---|---|
 | `NAME.elf` | Debuggable ELF32 executable |

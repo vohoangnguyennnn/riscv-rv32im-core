@@ -281,7 +281,7 @@ ACT4_SIM := $(BUILD_DIR)/tb_baremetal_act4/Vtb_baremetal_act4
 .DEFAULT_GOAL := test
 
 .PHONY: all test rtl-check-tools lint unit integration gate4 assertions fpga baremetal software-images isa-fetch \
-	freertos freertos-images fpga-freertos-images \
+	freertos freertos-images fpga-freertos-images freertos-config-check \
 	benchmark benchmark-images coremark coremark-images \
 	isa isa-images isa-rv32ui-arithmetic isa-rv32ui-control \
 	isa-rv32ui-memory isa-rv32ui isa-rv32um-multiply isa-rv32um-divide isa-rv32um \
@@ -293,7 +293,7 @@ ACT4_SIM := $(BUILD_DIR)/tb_baremetal_act4/Vtb_baremetal_act4
 
 all: test
 
-test: lint unit integration baremetal freertos isa
+test: lint unit integration baremetal freertos isa freertos-config-check
 	@echo "[PASS] RTL lint, $(words $(TOTAL_RTL_TESTS)) RTL simulations (including FreeRTOS SoC bring-up), $(words $(BAREMETAL_PROGRAMS)) bare-metal programs, and $(words $(ISA_PROGRAMS)) ISA tests completed"
 
 rtl-check-tools:
@@ -347,6 +347,9 @@ software-images:
 
 freertos-images:
 	@$(MAKE) -C sw BUILD_DIR=$(SOFTWARE_BUILD_DIR) freertos-images
+
+freertos-config-check:
+	@$(PYTHON) tools/check_freertos_config.py
 
 # Human-observable board image. Keep it separate from the bounded 2 ms
 # simulation image so the release payload cannot silently reuse test firmware.

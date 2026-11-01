@@ -510,6 +510,11 @@ owned slave response and its forwarding to the master at the reset edge.
 They detect an incompatible delayed-response slave or reset-time masking;
 they add no synthesized logic and do not extend the supported reset contract.
 
+Firmware clock-dependent settings are build inputs, not additional RTL clock
+controls. The FreeRTOS configuration stamp invalidates all application/kernel
+and BSP objects when clock or blink definitions change; it does not change the
+75 MHz generated clock. Firmware clock settings must still match the hardware.
+
 At the FPGA boundary, `reset_sync` converts the combined clock-boundary reset,
 user SoC reset, and clock-lock indication into the functional SoC reset. Only
 its synchronization pipeline captures the active-low event asynchronously;

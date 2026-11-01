@@ -117,6 +117,20 @@ LDFLAGS := \
 	-Wl,--gc-sections \
 	-Wl,--fatal-warnings
 
+# Compare the effective configuration without writing during make's parse.
+# Only a changed configuration adds FORCE. This also lets `make -n` distinguish
+# a real configuration change from an unchanged build without running the stamp recipe.
+FREERTOS_CONFIG_STAMP := $(BUILD_DIR)/freertos/config.stamp
+freertos_config_quote = '$(subst ','"'"',$(1))'
+FREERTOS_CONFIG_ARGS = \
+	$(call freertos_config_quote,CC=$(CC)) \
+	$(call freertos_config_quote,FREERTOS_CPPFLAGS=$(FREERTOS_CPPFLAGS)) \
+	$(call freertos_config_quote,FREERTOS_PROJECT_CFLAGS=$(FREERTOS_PROJECT_CFLAGS)) \
+	$(call freertos_config_quote,FREERTOS_KERNEL_CFLAGS=$(FREERTOS_KERNEL_CFLAGS))
+FREERTOS_CONFIG_FORCE := $(shell printf '%s\n' $(FREERTOS_CONFIG_ARGS) \
+	| cmp -s - $(call freertos_config_quote,$(FREERTOS_CONFIG_STAMP)) \
+	|| printf '%s' freertos-config-force)
+
 COMMON_OBJECTS := \
 	$(BUILD_DIR)/runtime/crt0.o \
 	$(BUILD_DIR)/runtime/trap.o \
@@ -127,7 +141,7 @@ DISASSEMBLIES := $(addprefix $(BUILD_DIR)/,$(addsuffix .dump,$(PROGRAMS)))
 .DEFAULT_GOAL := all
 
 .PHONY: all images baremetal-images freertos-check freertos-images \
-	coremark-check coremark-images coremark-force check-tools list clean
+	coremark-check coremark-images coremark-force freertos-config-force check-tools list clean
 
 all: baremetal-images freertos-images
 
@@ -150,6 +164,21 @@ coremark-check:
 coremark-images: coremark-check $(COREMARK_MEM_IMAGES) $(COREMARK_DISASSEMBLIES)
 
 coremark-force:
+
+freertos-config-force:
+
+$(FREERTOS_CONFIG_STAMP): $(FREERTOS_CONFIG_FORCE)
+	@mkdir -p "$(@D)"
+	@set -e; config_tmp="$@.tmp.$$$$"; \
+		printf '%s\n' $(FREERTOS_CONFIG_ARGS) > "$$config_tmp"; \
+		if ! cmp -s "$$config_tmp" "$@"; then \
+			echo "[CONFIG] FreeRTOS configuration changed"; \
+			mv -f "$$config_tmp" "$@"; \
+		else \
+			$(RM) "$$config_tmp"; \
+		fi
+
+$(FREERTOS_OBJECTS): $(FREERTOS_CONFIG_STAMP)
 
 check-tools:
 	@command -v $(CC) >/dev/null 2>&1 || { echo "error: $(CC) not found" >&2; exit 127; }

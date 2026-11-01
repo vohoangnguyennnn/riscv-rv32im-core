@@ -297,6 +297,7 @@ disabled because the core implements only the documented M-mode subset.
 | `make assertions` | Focus protocol, retirement, and interrupt assertion stress |
 | `make baremetal` | Build and execute both freestanding programs |
 | `make freertos` | Verify source hashes, build, and run the FreeRTOS SoC demo |
+| `make freertos-config-check` | Check changed clock/blink configurations rebuild all eight FreeRTOS/BSP objects; unchanged configurations preserve timestamps |
 | `make isa` | Run all 48 pinned `riscv-tests` programs |
 | `make test` | Run the complete public open-source gate |
 | `make act4` | Run the separate 47-test Sail-backed suite |
