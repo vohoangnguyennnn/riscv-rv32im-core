@@ -110,7 +110,9 @@ module csr_file #(
       end
 
       CSR_MISA: begin
-        rdata_o = MISA_RV32IM;
+        // WARL with one supported value: writes are legal and ignored.
+        rdata_o         = MISA_RV32IM;
+        access_writable = 1'b1;
       end
 
       CSR_MIE: begin
@@ -237,6 +239,7 @@ module csr_file #(
       end
 
       unique case (commit_waddr_i)
+        CSR_MISA: ; // Fixed RV32IM configuration; no extension bits are mutable.
         CSR_MSTATUS: begin
           // Unsupported fields are RO0; MPP is WARL=M.
           mstatus_d = MSTATUS_MPP_M_VALUE | (commit_wdata_i & MSTATUS_WRITABLE_MASK);

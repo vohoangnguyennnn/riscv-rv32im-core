@@ -169,7 +169,7 @@ module tb_csr_core;
       u_tcm.mem[i] = 32'h0000_0013;
     end
 
-    illegal_csr_insn = encode_csr(CSR_MISA, FUNCT3_CSRRW, 5'd9, 5'd0);
+    illegal_csr_insn = encode_csr(CSR_MVENDORID, FUNCT3_CSRRW, 5'd9, 5'd0);
 
     u_tcm.mem[0]  = encode_addi(5'd14, 5'd0, 12'h120);
     u_tcm.mem[1]  = encode_csr(CSR_MTVEC, FUNCT3_CSRRW, 5'd0, 5'd14);

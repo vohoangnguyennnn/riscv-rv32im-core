@@ -101,5 +101,18 @@ int main(void)
   BM_CHECK((misa & (UINT32_C(1) << 12)) != 0U, UINT32_C(15));
   BM_CHECK(bm_csr_read_mhartid() == 0U, UINT32_C(16));
 
+  /* misa is WARL at a read-write CSR address. All six write forms must retire
+   * without changing the fixed extension set or raising an illegal trap.
+   */
+  __asm__ volatile (
+    "csrrw zero, misa, zero\n\t"
+    "csrrs zero, misa, %0\n\t"
+    "csrrc zero, misa, %0\n\t"
+    "csrrwi zero, misa, 0\n\t"
+    "csrrsi zero, misa, 31\n\t"
+    "csrrci zero, misa, 31"
+    : : "r" (UINT32_MAX) : "memory");
+  BM_CHECK(bm_csr_read_misa() == misa, UINT32_C(17));
+
   return 0;
 }

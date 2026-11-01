@@ -157,7 +157,7 @@ independently of FPGA memory inference semantics.
 | CSR | Address | Access | Implemented behavior |
 |---|---:|---:|---|
 | `mstatus` | `0x300` | RW/WARL | `MIE`/`MPIE` writable; `MPP` hardwired to M; all other fields zero |
-| `misa` | `0x301` | RO | `MXL=1`; I and M bits set (`0x4000_1100`) |
+| `misa` | `0x301` | RW/WARL | Fixed `MXL=1`, I and M bits (`0x4000_1100`); writes are legal and ignored |
 | `mie` | `0x304` | RW/WARL | `MTIE` writable; `MSIE`/`MEIE` and other fields read zero |
 | `mtvec` | `0x305` | RW | Direct mode only; low two bits are forced to zero |
 | `mscratch` | `0x340` | RW | General trap-handler scratch register |
@@ -185,6 +185,11 @@ CSR reads and legality checks occur in EX, but state changes occur only at WB.
 write when `rs1=x0` or `zimm=0`, allowing read-only CSR access without an
 illegal write. Access to an unimplemented CSR, or an actual write to a read-only
 CSR, raises an illegal-instruction exception.
+
+`misa` is a WARL register at a read-write CSR address, with only one supported
+value in this core. Writes do not change the extension set and do not trap.
+ID CSRs at read-only addresses, including `mvendorid`, still reject actual
+writes. This follows the [RISC-V machine ISA specification](https://docs.riscv.org/reference/isa/priv/machine.html).
 
 `mstatus` resets with `MPP=M`, `MIE=0`, and `MPIE=0`. Precise trap entry saves
 the previous global enable with `MPIE←MIE` and clears `MIE`. A committed `MRET`

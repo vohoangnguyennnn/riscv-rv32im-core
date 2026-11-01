@@ -90,6 +90,8 @@ and require an owned response to reach the master before ownership is cleared.
 See [Verification](docs/verification.md) for the intentional negative test.
 Divider unit tests and the bare-metal smoke program also check equal-magnitude
 and adjacent-magnitude division to guard the strict shortcut boundary.
+CSR regression checks that writes to fixed WARL `misa` retire without changing
+its value, while writes to read-only ID CSRs still trap.
 
 ### Other targets
 

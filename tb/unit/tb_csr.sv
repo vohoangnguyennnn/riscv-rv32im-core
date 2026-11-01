@@ -139,6 +139,18 @@ module tb_csr;
     end
   endtask
 
+  task automatic check_misa_write(
+    input csr_cmd_e command,
+    input word_t value,
+    input string test_name
+  );
+    check_access(CSR_MISA, command, 1'b1, MISA_RV32IM, 1'b0,
+                 {test_name, " write is legal"});
+    commit_csr(CSR_MISA, value, 1'b1);
+    check_access(CSR_MISA, CSR_RS, 1'b0, MISA_RV32IM, 1'b0,
+                 {test_name, " fixed WARL value after commit"});
+  endtask
+
   initial begin
     word_t minstret_before_trap;
 
@@ -173,20 +185,29 @@ module tb_csr;
 
     // All six Zicsr command classes receive correct read-only legality. The
     // set/clear forms become pure reads when their register/zimm source is 0.
-    check_access(CSR_MISA, CSR_RW,  1'b0, MISA_RV32IM, 1'b1, "CSRRW read-only illegal");
-    check_access(CSR_MISA, CSR_RWI, 1'b0, MISA_RV32IM, 1'b1, "CSRRWI read-only illegal");
-    check_access(CSR_MISA, CSR_RS,  1'b0, MISA_RV32IM, 1'b0, "CSRRS zero source read");
-    check_access(CSR_MISA, CSR_RS,  1'b1, MISA_RV32IM, 1'b1, "CSRRS write read-only illegal");
-    check_access(CSR_MISA, CSR_RC,  1'b0, MISA_RV32IM, 1'b0, "CSRRC zero source read");
-    check_access(CSR_MISA, CSR_RC,  1'b1, MISA_RV32IM, 1'b1, "CSRRC write read-only illegal");
-    check_access(CSR_MISA, CSR_RSI, 1'b0, MISA_RV32IM, 1'b0, "CSRRSI zero source read");
-    check_access(CSR_MISA, CSR_RSI, 1'b1, MISA_RV32IM, 1'b1, "CSRRSI write read-only illegal");
-    check_access(CSR_MISA, CSR_RCI, 1'b0, MISA_RV32IM, 1'b0, "CSRRCI zero source read");
-    check_access(CSR_MISA, CSR_RCI, 1'b1, MISA_RV32IM, 1'b1, "CSRRCI write read-only illegal");
+    check_access(CSR_MVENDORID, CSR_RW,  1'b0, 32'b0, 1'b1, "CSRRW read-only illegal");
+    check_access(CSR_MVENDORID, CSR_RWI, 1'b0, 32'b0, 1'b1, "CSRRWI read-only illegal");
+    check_access(CSR_MVENDORID, CSR_RS,  1'b0, 32'b0, 1'b0, "CSRRS zero source read");
+    check_access(CSR_MVENDORID, CSR_RS,  1'b1, 32'b0, 1'b1, "CSRRS write read-only illegal");
+    check_access(CSR_MVENDORID, CSR_RC,  1'b0, 32'b0, 1'b0, "CSRRC zero source read");
+    check_access(CSR_MVENDORID, CSR_RC,  1'b1, 32'b0, 1'b1, "CSRRC write read-only illegal");
+    check_access(CSR_MVENDORID, CSR_RSI, 1'b0, 32'b0, 1'b0, "CSRRSI zero source read");
+    check_access(CSR_MVENDORID, CSR_RSI, 1'b1, 32'b0, 1'b1, "CSRRSI write read-only illegal");
+    check_access(CSR_MVENDORID, CSR_RCI, 1'b0, 32'b0, 1'b0, "CSRRCI zero source read");
+    check_access(CSR_MVENDORID, CSR_RCI, 1'b1, 32'b0, 1'b1, "CSRRCI write read-only illegal");
     check_access(CSR_MIP,  CSR_RW,  1'b1, 32'b0,       1'b0, "mip write legal");
     check_access(CSR_MCONFIGPTR, CSR_RW, 1'b1, 32'b0,  1'b1, "mconfigptr write illegal");
     check_access(12'h999,  CSR_RS,  1'b0, 32'b0,       1'b1, "unimplemented CSR illegal");
     check_access(12'h999,  CSR_NONE,1'b0, 32'b0,       1'b0, "inactive CSR access benign");
+
+    // Unlike the 0xfxx ID CSRs, misa is RW-addressed WARL. Every write command
+    // is legal even though only the fixed RV32IM value can be represented.
+    check_misa_write(CSR_RW,  32'b0,          "CSRRW misa zero");
+    check_misa_write(CSR_RWI, 32'hffff_ffff,  "CSRRWI misa ones");
+    check_misa_write(CSR_RS,  32'hffff_ffff,  "CSRRS misa ones");
+    check_misa_write(CSR_RC,  32'b0,          "CSRRC misa zero");
+    check_misa_write(CSR_RSI, 32'hffff_ffff,  "CSRRSI misa ones");
+    check_misa_write(CSR_RCI, 32'b0,          "CSRRCI misa zero");
 
     // Writable machine CSRs commit only at the clock edge. WARL alignment and
     // mcause narrowing are enforced by the state-holding block.

@@ -166,6 +166,14 @@ pairs with explicit instructions and constant expected results, so equality
 cannot disappear through compiler folding. A `<` to `<=` shortcut mutation
 must fail both `make tb_div_unit` and `make baremetal-smoke`.
 
+CSR tests distinguish fixed WARL `misa` from read-only ID CSRs: all six write
+forms to `misa` are legal and preserve `MISA_RV32IM`, while writes to
+`mvendorid` remain illegal. `tb_csr_core` uses `mvendorid` for its precise
+illegal-write trap; bare-metal smoke executes all six `misa` write forms.
+The pinned ISA suite contains no dedicated misa-write test, and ACT4 is
+configured with `include_priv_tests: false`; those I/M suites do not establish
+privileged misa conformance. The focused CSR and smoke tests are the oracle.
+
 ### 5.2 Pipeline and SoC invariants
 
 | Testbench | Acceptance responsibility |
