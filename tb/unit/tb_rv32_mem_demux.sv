@@ -452,6 +452,13 @@ module tb_rv32_mem_demux;
     check_bit(dut.pending_q, 1'b1, "reset test request pending");
     @(negedge clk);
     rst = 1'b1;
+    // Negative-only stimulus: make the selected slave miss its first response
+    // edge. The demux reset assertion must fail before the fallback fatal.
+    if ($test$plusargs("delay_reset_response")) begin
+      @(posedge clk);
+      #1;
+      $fatal(1, "reset assertion failed to reject a delayed slave response");
+    end
     set_response(TARGET_TIMER, 32'hffff_0000, 1'b0);
     #1;
     check_bit(core.req_ready, 1'b0, "reset blocks request");

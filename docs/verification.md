@@ -198,6 +198,12 @@ edge clears ownership. This test does not establish reset compatibility with
 an arbitrary delayed-response slave; such an integration must preserve pending
 ownership until the old response can be drained.
 
+The demux also asserts `(rst_i && pending_q) |-> pending_rsp_valid` and requires
+the owned response to remain visible at the master. Neither property uses
+`disable iff (rst_i)`. To exercise the unsupported delayed-slave assumption,
+run the compiled `Vtb_rv32_mem_demux` with `+delay_reset_response`; this is an
+intentional negative test and must fail at the demux assertion.
+
 The FreeRTOS bench boots the pinned image on the production 64 KiB SoC,
 decodes serial UART TX, drives UART RX, observes GPIO activity, classifies
 trap entries from `mcause`, and checks the report block. Exact

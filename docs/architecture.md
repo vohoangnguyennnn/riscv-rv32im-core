@@ -497,6 +497,10 @@ blocks new requests during reset but forwards an already-owned response, so
 the LSU can drain it at the reset edge before demux ownership is cleared.
 Attaching a longer-latency slave requires retaining ownership across reset
 until that response is drained; clearing ownership alone would lose it.
+Simulation-only assertions remain enabled during reset and require both the
+owned slave response and its forwarding to the master at the reset edge.
+They detect an incompatible delayed-response slave or reset-time masking;
+they add no synthesized logic and do not extend the supported reset contract.
 
 At the FPGA boundary, `reset_sync` converts the combined clock-boundary reset,
 user SoC reset, and clock-lock indication into the functional SoC reset. Only

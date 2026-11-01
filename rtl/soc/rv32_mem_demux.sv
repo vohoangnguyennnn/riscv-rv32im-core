@@ -207,4 +207,16 @@ module rv32_mem_demux #(
     end
   end
 
+`ifndef SYNTHESIS
+  // These checks intentionally remain active during reset. Ownership may be
+  // cleared only when its response can be drained at that same clock edge.
+  a_reset_owned_response_available: assert property (
+    @(posedge clk_i) (rst_i && pending_q) |-> pending_rsp_valid
+  ) else $fatal(1, "demux reset would discard ownership before its response is available");
+
+  a_reset_owned_response_forwarded: assert property (
+    @(posedge clk_i) (rst_i && pending_q) |-> core_s.rsp_valid
+  ) else $fatal(1, "demux reset hid an owned response from the master");
+`endif
+
 endmodule
