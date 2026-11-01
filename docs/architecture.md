@@ -311,10 +311,10 @@ Conditional branches, `JAL`, `JALR`, and `MRET` resolve in EX using forwarded
 source operands. Branch and `JAL` targets are PC-relative. `JALR` computes
 `rs1 + imm` and clears bit 0 before the `IALIGN=32` alignment check.
 
-A taken transfer captures the control instruction from ID/EX into EX/MEM,
-clears its old ID/EX slot, and squashes younger IF/ID and fetch work. Recovery
-latency depends on fetch-response timing; the number of flushed boundaries is
-not a universal branch-penalty count. A not-taken conditional branch
+An accepted EX redirect advances the control instruction to EX/MEM, clears its
+old ID/EX slot, and squashes younger IF/ID and fetch work. Recovery latency
+depends on fetch-response timing; flushed boundaries do not imply a fixed
+two-cycle branch penalty. A not-taken conditional branch
 does not redirect or flush. A taken target with either low address bit set
 raises an instruction-address-misaligned exception on the control-transfer
 instruction; no redirect is issued.

@@ -73,7 +73,7 @@ recipes, deterministic zoom ranges, images, and this interpretation guide.
 | Five-stage retirement | `make questa-gui TEST=tb_rv32_core` | `pipeline_retirement` | Pipeline occupancy and single MEM/WB commit point |
 | Forwarding/load-use | `make questa-gui TEST=tb_pipeline_forwarding` | `forwarding_load_use` | EX/MEM priority, MEM/WB forwarding, one-bubble load-use interlock |
 | Memory backpressure | `make questa-gui TEST=tb_pipeline_memory_wait` | `memory_backpressure` | Stable request, global hold, and exactly-once retirement |
-| Branch redirect | `make questa-gui TEST=tb_core_control_flow` | `branch_redirect` | EX redirect and two-younger-instruction squash |
+| Branch redirect | `make questa-gui TEST=tb_core_control_flow` | `branch_redirect` | EX redirect, control-packet advance, and younger-work squash |
 | Trap and MRET | `make questa-gui TEST=tb_core_control_flow` | `trap_mret` | Precise synchronous trap, handler entry, and return |
 | Timer interrupt | `make questa-gui TEST=tb_timer_interrupt_core` | `timer_enable_mret` | MTIP eligibility, in-flight CSR interlock, drain, and interrupt identity |
 | MMIO response ownership | `make questa-gui TEST=tb_rv32_mem_demux` | `demux_back_to_back` | Back-to-back requests to different slaves |
@@ -195,7 +195,13 @@ the blocked transaction, and the WB packet is not recommitted during the hold.
 
 At approximately 145 ns the controller selects `ACTION_EX_REDIRECT`, asserts
 `redirect_valid`, and drives target `0x0000002c`. `if_id_flush` and
-`id_ex_flush` assert together, removing the two younger wrong-path packets.
+`id_ex_flush` assert together.
+
+An accepted EX redirect advances the control instruction to EX/MEM, clears its
+old ID/EX slot, and squashes younger IF/ID and fetch work. Recovery latency
+depends on fetch-response timing; flushed boundaries do not imply a fixed
+two-cycle branch penalty.
+
 After the redirect bubble, fetch/retirement resumes on the target path; the
 retirement trace records the taken control transfer without a wrong-path side
 effect.

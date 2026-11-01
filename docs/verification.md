@@ -197,6 +197,12 @@ synchronous trap against pending MTIP, CSR enable/disable at commit, and
 backpressured or delayed memory responses. The result is judged at retirement
 or at the external interface after all older work has resolved.
 
+For accepted EX redirects, `tb_core_control_flow` checks that the control
+instruction retires and wrong-path work has no architectural side effects.
+Clearing the old ID/EX slot does not squash that control instruction, which
+advances to EX/MEM. The number of flushed boundaries is not a fixed cycle
+penalty; recovery also depends on instruction-response timing.
+
 `make tb_soc_reset` runs 12 deterministic scenarios with the production SoC
 and bound core assertions. It includes a no-reset control run, reset after an
 accepted load and store at each of the four data targets, reset while a second

@@ -122,7 +122,7 @@ the [release](https://github.com/vohoangnguyennnn/riscv-rv32im-core/releases/tag
 |---|---|
 | ISA | RV32I 2.1, full RV32M 2.0, six Zicsr 2.0 operations, `MRET`, and no-op `WFI` |
 | Privilege | Machine mode only; documented CSR subset; no caches, MMU, or PMP |
-| Control transfer | Branch/`JAL`/`JALR`/`MRET` resolved in EX; taken transfers flush two younger packets |
+| Control transfer | Resolved in EX; accepted redirects advance the control instruction to EX/MEM and squash younger IF/ID and fetch work |
 | Traps | Precise synchronous exceptions and machine-timer interrupt (cause 7), committed at WB |
 | Memory | Independent instruction/data request-response ports, little-endian |
 | RV32M | Two-stage registered multiply; 32-iteration divide with local corner-case results |
@@ -139,6 +139,11 @@ Pipeline control is centralized around architectural validity:
 - Redirects and traps invalidate younger instructions before they can retire or commit stores.
 - Flushes dominate stalls, so redirect and trap handling stay precise under back-pressure.
 - Divide-by-zero and signed overflow return the RV32M-defined results without trapping.
+
+An accepted EX redirect advances the control instruction to EX/MEM, clears its
+old ID/EX slot, and squashes younger IF/ID and fetch work. Recovery latency
+depends on fetch-response timing; flushed boundaries do not imply a fixed
+two-cycle branch penalty.
 
 Details: [Architecture](docs/architecture.md) and [Pipeline control](docs/pipeline-control.md).
 
