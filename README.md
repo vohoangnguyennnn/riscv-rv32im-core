@@ -30,12 +30,16 @@ provenance and claim boundaries are recorded in
 | Software | 2/2 bare-metal programs and the FreeRTOS V11.3.0 demo pass on Verilator and Questa |
 | ISA suites | 40 RV32I + 8 RV32M pinned `riscv-tests`; 39 RV32I + 8 RV32M ACT4 4.0.0 (Sail-backed) |
 | FPGA target | MicroPhase A7-Lite R1.1, AMD/Xilinx Artix-7 `xc7a35tfgg484-2` |
-| Implementation | Vivado 2024.1, fully routed at 75 MHz; setup WNS +0.070 ns, hold WHS +0.066 ns, 0 DRC errors |
-| Utilization | 3,815 LUT (18.34%), 2,001 FF (4.81%), 16 BRAM (32.00%), 4 DSP (4.44%), 10 bonded I/O |
-| Power | 0.253 W vectorless post-route estimate, Medium confidence; not board-measured |
+| Implementation | Vivado 2024.1, fully routed at 75 MHz; setup WNS +0.095 ns, hold WHS +0.084 ns |
+| Utilization | 3,751 LUT (18.03%), 2,003 FF (4.81%), 16 BRAM (32.00%), 4 DSP (4.44%), 10 bonded I/O |
+| Power | 0.252 W vectorless post-route estimate, Medium confidence; not board-measured |
 | Directed performance | 35,245 instructions in 50,101 cycles; CPI 1.422, IPC 0.703 |
 | CoreMark | 2.127 CoreMark/MHz (CRC-valid performance run, CPI 1.642) |
 | Board bring-up | Released bitstream validated for boot, UART echo, GPIO, PASS/DONE, and both reset paths |
+
+The implementation, utilization, and power values above follow the updated
+Vivado captures in `docs/images/`. Archived report hashes and board validation
+below identify the earlier `v1.0.0` implementation.
 
 The `v1.0.0` release packages the programmable bitstream, FreeRTOS ELF and
 `.mem` image, Vivado evidence archive, artifact manifest, and SHA-256 sums. The
@@ -205,8 +209,8 @@ clock in one functional clock domain. Firmware is loaded through
 bitstream-initialized TCM block RAM. Board observability comprises heartbeat
 and PASS LEDs, DONE/FAIL outputs on JP2, the CH340 UART, and GPIO output bit 0.
 
-All 6,890 setup/hold endpoints meet timing at the 75 MHz target, with zero
-unclocked or unconstrained endpoints. The small positive setup margin is a
+The updated Vivado timing capture shows all 6,892 setup/hold endpoints meeting
+timing at the 75 MHz target. The small positive setup margin is a
 closure point, not a device Fmax claim.
 
 Details: [FPGA](docs/fpga.md) for pins, reset, Vivado flow, and reports, and
