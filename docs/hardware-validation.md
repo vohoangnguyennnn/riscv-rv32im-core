@@ -9,7 +9,9 @@ Detailed contracts remain in [Architecture](architecture.md),
 [Verification](verification.md), [Software](software.md), and
 [FPGA implementation](fpga.md).
 
-## 1. Validation disposition
+<a id="1-validation-disposition"></a>
+
+## 1. Validation disposition (archived v1.0.0)
 
 | Evidence class | Disposition |
 |---|---|
@@ -23,7 +25,7 @@ Detailed contracts remain in [Architecture](architecture.md),
 | Exact clean-package bitstream `94603524...` deployed on the target board | **PASS** |
 | Tagged public release with packaged artifacts | **PUBLISHED** as `v1.0.0` |
 
-The current implementation package uses `TCM_INIT_FILE=freertos_demo.mem`,
+The archived `v1.0.0` implementation package uses `TCM_INIT_FILE=freertos_demo.mem`,
 contains all ten constrained top-level ports, and was exported from clean
 implementation commit `fc57a72`. The exact manifest-identified bitstream was
 programmed and passed the documented FreeRTOS board checks. The bitstream,
@@ -36,7 +38,7 @@ or silicon qualification.
 
 ## 2. FreeRTOS implementation provenance
 
-The local source package is:
+The archived release source package is:
 
 ```text
 Report_vivado/freertos/20260903_103705/
@@ -143,21 +145,28 @@ clock. They are not FPGA wall-clock measurements.
 
 ## 5. Post-route implementation results
 
+The timing, utilization, and power figures in this section follow the updated
+Vivado captures supplied on 2026-11-04. The provenance in Section 2, report
+hashes in Section 7, and board-validation results identify the earlier
+`v1.0.0` package. New text reports, source identity, and bitstream hashes have
+not yet been recorded for the updated captures.
+
 ### 5.1 Timing and routing
 
 | Metric | Post-route result |
 |---|---:|
 | Board clock | 50 MHz / 20.000 ns |
 | Generated SoC clock | 75 MHz / 13.333 ns |
-| Setup WNS / TNS | +0.070 ns / 0.000 ns |
-| Setup failing endpoints | 0 / 6,890 |
-| Hold WHS / THS | +0.066 ns / 0.000 ns |
-| Hold failing endpoints | 0 / 6,890 |
+| Setup WNS / TNS | +0.095 ns / 0.000 ns |
+| Setup failing endpoints | 0 / 6,892 |
+| Hold WHS / THS | +0.084 ns / 0.000 ns |
+| Hold failing endpoints | 0 / 6,892 |
 | Worst pulse-width slack / TPWS | +5.537 ns / 0.000 ns |
-| Unclocked sequential pins | 0 |
-| Unconstrained internal paths | 0 |
-| Combinational loops | 0 |
-| Failed or unrouted nets | 0 |
+| Pulse-width failing endpoints | 0 / 2,129 |
+| Unclocked sequential pins | Archived release: 0; new report pending |
+| Unconstrained internal paths | Archived release: 0; new report pending |
+| Combinational loops | Archived release: 0; new report pending |
+| Failed or unrouted nets | Archived release: 0; new report pending |
 
 The positive slack closes this specific implementation at 75 MHz. The small
 setup margin is not an Fmax claim and should not be described as broad timing
@@ -176,23 +185,23 @@ positive setup, hold, and pulse-width slack.</em></p>
 
 | Resource | Used / available | Utilization |
 |---|---:|---:|
-| Slice LUTs | 3,815 / 20,800 | 18.34% |
-| LUT as logic | 3,771 / 20,800 | 18.13% |
+| Slice LUTs | 3,751 / 20,800 | 18.03% |
+| LUT as logic | 3,707 / 20,800 | 17.82% |
 | LUT as memory | 44 / 9,600 | 0.46% |
-| Slice registers | 2,001 / 41,600 | 4.81% |
-| Slices | 1,154 / 8,150 | 14.16% |
+| Slice registers | 2,003 / 41,600 | 4.81% |
+| Slices | 1,141 / 8,150 | 14.00% |
 | Block RAM tiles | 16 / 50 | 32.00% |
 | DSP48E1 | 4 / 90 | 4.44% |
 | Bonded I/O | 10 / 250 | 4.00% |
 | BUFGCTRL | 2 / 32 | 6.25% |
 | MMCME2_ADV | 1 / 5 | 20.00% |
 
-DRC reports zero errors and eight warnings: four `DPOP-1` and four `DPOP-2`
+The archived DRC report records zero errors and eight warnings: four `DPOP-1` and four `DPOP-2`
 DSP pipelining advisories. They are accepted for the documented 75 MHz point
 because routed timing closes; they remain optimization guidance rather than a
 general waiver.
 
-The methodology report contains 21 reviewed warnings: one `LUTAR-1`, four
+The archived methodology report contains 21 reviewed warnings: one `LUTAR-1`, four
 `SYNTH-10`, and sixteen `SYNTH-15`. The `SYNTH-10` and `SYNTH-15` findings
 describe the selected wide-multiplier and byte-write-enabled TCM mappings.
 `LUTAR-1` flags the LUT that combines reset requests and MMCM `locked` before
@@ -206,15 +215,15 @@ a production reset-safety waiver.
   </a>
 </p>
 
-<p align="center"><em>The implementation uses 3,815 LUTs, 2,001 registers,
+<p align="center"><em>The implementation uses 3,751 LUTs, 2,003 registers,
 16 BRAM tiles, four DSPs, and all ten constrained board I/O ports.</em></p>
 
 ### 5.3 Power estimate
 
 | Metric | Post-route estimate |
 |---|---:|
-| Total on-chip power | 0.253 W |
-| Dynamic | 0.180 W |
+| Total on-chip power | 0.252 W |
+| Dynamic | 0.179 W |
 | Device static | 0.073 W |
 | Junction / ambient temperature | 25.7 °C / 25.0 °C |
 | Confidence | Medium |
@@ -228,7 +237,7 @@ does not model observed FreeRTOS workload activity with a VCD/SAIF file.
   </a>
 </p>
 
-<p align="center"><em>The 0.253 W result has Medium confidence and remains an
+<p align="center"><em>The 0.252 W result has Medium confidence and remains an
 implementation estimate, not a physical power measurement.</em></p>
 
 ## 6. I/O and physical-board validation
@@ -295,7 +304,7 @@ authority.</em></p>
 | `freertos_demo.dump` | `f18e4d9fd3207dba49e5c0c4a7897cb6f6bd8dc9d4490400ee8d217f58ed90d4` |
 | `fpga_top.bit` | `9460352401ae6037545aa4671e3dd4e46c49ad779eea0c142569b6194865581a` |
 
-### 7.2 Sign-off report hashes
+### 7.2 Sign-off report hashes (archived v1.0.0)
 
 | Report | SHA-256 |
 |---|---|
@@ -323,7 +332,7 @@ layered functional check and does not require a duplicate public set of timing,
 utilization, DRC, and power reports when RTL, XDC, part, clock, and strategies
 are unchanged.
 
-## 9. Release gate
+## 9. Release gate (archived v1.0.0)
 
 - [x] RTL, software, ISA, ACT4, benchmark, and CoreMark runs pass.
 - [x] FreeRTOS Verilator and Questa runs pass.
