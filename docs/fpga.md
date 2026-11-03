@@ -391,24 +391,32 @@ separate Sail-backed architectural gate. These simulation results establish
 functional confidence but do not replace implementation or physical-board
 evidence.
 
-## 8. Released implementation result (v1.0.0)
+<a id="8-released-implementation-result-v100"></a>
 
-The validated package, `Report_vivado/freertos/20260903_103705/`, was generated
+## 8. Current implementation results and archived release
+
+The archived `v1.0.0` package, `Report_vivado/freertos/20260903_103705/`, was generated
 on 2026-09-03 with Vivado 2024.1 build 5076996 for `xc7a35tfgg484-2`. It records
 clean implementation commit `fc57a72`, top `fpga_top`, and
 `TCM_INIT_FILE=freertos_demo.mem SOC_CLK_FREQ_HZ=75000000`. Its bitstream and
 evidence archive are attached to the [`v1.0.0` release](https://github.com/vohoangnguyennnn/riscv-rv32im-core/releases/tag/v1.0.0).
 
-| Gate | Reviewed result |
+The timing, utilization, and power values below follow the updated Vivado
+captures supplied on 2026-11-04. The archived package above identifies the
+earlier release; its report hashes and board results do not identify this new
+implementation. Routing, coverage, DRC, bitstream, and methodology findings
+remain archived results until new text reports are exported.
+
+| Gate | Result and evidence |
 |---|---|
-| Placement and routing | Fully routed; zero unrouted or partially routed nets |
-| Setup timing at 75 MHz | MET; WNS `+0.070 ns`, TNS `0.000 ns` |
-| Hold timing | MET; WHS `+0.066 ns`, THS `0.000 ns` |
+| Placement and routing | Archived release: fully routed; zero unrouted or partially routed nets |
+| Setup timing at 75 MHz | MET; WNS `+0.095 ns`, TNS `0.000 ns` |
+| Hold timing | MET; WHS `+0.084 ns`, THS `0.000 ns` |
 | Pulse width | MET; worst slack `+5.537 ns` |
-| Internal timing coverage | 0 unclocked registers, 0 unconstrained endpoints, 0 combinational loops |
-| DRC | 0 errors; 8 reviewed DSP pipelining advisories |
-| Bitstream | Generated successfully |
-| Power estimate | 0.253 W total, Medium confidence |
+| Internal timing coverage | Archived release: 0 unclocked registers, 0 unconstrained endpoints, 0 combinational loops |
+| DRC | Archived release: 0 errors; 8 reviewed DSP pipelining advisories |
+| Bitstream | Archived release: generated successfully |
+| Power estimate | 0.252 W total, Medium confidence |
 
 The small positive margin supports this implemented 75 MHz point only; it is
 not an Fmax result.
@@ -424,26 +432,27 @@ not an Fmax result.
 </p>
 
 <p align="center"><em>FreeRTOS post-route timing summary for the current
-75 MHz implementation. The hashed text report remains the numeric authority.</em></p>
+75 MHz implementation, with 6,892 setup and hold endpoints and no timing
+violations. Archived text-report hashes identify the earlier release.</em></p>
 
 Resource use is:
 
 | Resource | Used / available | Utilization |
 |---|---:|---:|
-| Slice LUTs | 3,815 / 20,800 | 18.34% |
-| Slice registers | 2,001 / 41,600 | 4.81% |
-| Slices | 1,154 / 8,150 | 14.16% |
+| Slice LUTs | 3,751 / 20,800 | 18.03% |
+| Slice registers | 2,003 / 41,600 | 4.81% |
+| Slices | 1,141 / 8,150 | 14.00% |
 | Block RAM tiles | 16 / 50 | 32.00% |
 | DSP48E1 | 4 / 90 | 4.44% |
 | Bonded I/O | 10 / 250 | 4.00% |
 | BUFGCTRL | 2 / 32 | 6.25% |
 | MMCME2_ADV | 1 / 5 | 20.00% |
 
-The four `DPOP-1` and four `DPOP-2` warnings identify unpipelined multiplier
+In the archived release, four `DPOP-1` and four `DPOP-2` warnings identify unpipelined multiplier
 DSP outputs/stages. They are accepted for this 75 MHz implementation because
 routed timing closes, but remain optimization guidance rather than waivers.
 
-The methodology report contains 21 reviewed warnings: one `LUTAR-1`, four
+The archived methodology report contains 21 reviewed warnings: one `LUTAR-1`, four
 `SYNTH-10`, and sixteen `SYNTH-15`. `SYNTH-10` describes the intended wide
 RV32M multiplier decomposition into four DSPs. `SYNTH-15` records the selected
 BRAM implementation for the byte-write-enabled 64 KiB TCM; functional byte
@@ -469,7 +478,7 @@ use, including all ten bonded board I/O ports.</em></p>
 </p>
 
 <p align="center"><em>Placement and routing view supplied for the Artix-7
-implementation. Numeric sign-off remains tied to the archived text reports.</em></p>
+implementation. The updated view is separate from the earlier release text reports.</em></p>
 
 <p align="center">
   <a href="images/schematic_fpga.png">
@@ -503,7 +512,7 @@ Reviewed evidence is:
 | Metrics and disposition | [Hardware validation §5](hardware-validation.md#5-post-route-implementation-results) |
 | Artifact hashes | [Hardware validation §7](hardware-validation.md#7-artifact-identity) |
 
-The latest post-route estimate is 0.253 W: 0.180 W dynamic and 0.073 W device
+The latest post-route estimate is 0.252 W: 0.179 W dynamic and 0.073 W device
 static, with a 25.7 °C estimated junction temperature. Vivado rates confidence
 as Medium because I/O and internal-node activity are incompletely specified.
 It is a vectorless estimate, not measured board power and not a FreeRTOS
