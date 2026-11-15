@@ -8,6 +8,7 @@ linker_script: link.ld
 dut_include_dir: .
 
 # The RTL implements a deliberately small same-privilege M-mode environment,
-# not the complete Sm contract (mstatus, interrupts, PMP, U/S modes, ...).
+# not the complete Sm contract. Its CSR subset and MTIP support do not imply
+# complete privileged conformance; PMP and U/S modes are outside core scope.
 # Keep privileged ACTs disabled until that architectural scope is implemented.
 include_priv_tests: false
