@@ -454,6 +454,7 @@ help:
 	@echo "  make questa-baremetal-gui PROGRAM=smoke  Debug one bare-metal image"
 	@echo "  make questa-freertos-gui  Debug the FreeRTOS SoC demo"
 	@echo "  make questa-isa-gui ISA_TEST=rv32ui-add  Debug one ISA image"
+	@echo "  make asic         Run the sky130hd ASIC flow for the core in Docker (stages: asic-synth/floorplan/place/cts/route/finish)"
 	@echo "  make list         List every available simulation test"
 	@echo "  make clean        Remove local Verilator, software, ISA, Questa, and ACT4 results"
 	@echo ""
@@ -767,3 +768,44 @@ $(1): $(BUILD_DIR)/$(1)/V$(1)
 endef
 
 $(foreach test,$(ALL_TESTS),$(eval $(call TEST_template,$(test))))
+
+# ---------------------------------------------------------------------------
+# ASIC flow (OpenROAD-flow-scripts, sky130hd) for the bare core; see asic/
+# ---------------------------------------------------------------------------
+# Pinned image so results are reproducible; the flow scripts inside it are used.
+ORFS_IMAGE ?= openroad/orfs@sha256:a2715a8666b2b7b033e54fc65b703fd00b0f99e961b1841964b2ff9982aa5fd0
+ASIC_WORK ?= $(REPO_ROOT)/build/asic
+CLK_PERIOD_NS ?= 20.0
+ORFS_RUN = docker run --rm -u $$(id -u):$$(id -g) -v $(REPO_ROOT):$(REPO_ROOT) \
+	-e CLK_PERIOD_NS=$(CLK_PERIOD_NS) $(ORFS_IMAGE) bash -c \
+	"source ./env.sh && make -C flow DESIGN_CONFIG=$(REPO_ROOT)/asic/config.mk WORK_HOME=$(ASIC_WORK) $(1)"
+
+ASIC_RESULTS := $(ASIC_WORK)/results/sky130hd/rv32im_core/base
+
+.PHONY: asic asic-synth asic-floorplan asic-place asic-cts asic-route asic-finish asic-clean asic-sta
+asic: asic-finish
+asic-synth asic-floorplan asic-place asic-cts asic-route asic-finish:
+	$(call ORFS_RUN,$(patsubst asic-%,%,$@))
+# Front-end pre-layout STA on the synthesized netlist.
+asic-sta:
+	docker run --rm -u $$(id -u):$$(id -g) -v $(REPO_ROOT):$(REPO_ROOT) -e CLK_PERIOD_NS=$(CLK_PERIOD_NS) \
+		-e ASIC_NETLIST=$(ASIC_RESULTS)/1_2_yosys.v -e ASIC_SDC=$(REPO_ROOT)/asic/constraint.sdc $(ORFS_IMAGE) \
+		bash -c "source ./env.sh && openroad -no_init -exit $(REPO_ROOT)/asic/sta_prelayout.tcl" | tee $(ASIC_WORK)/sta_prelayout.rpt
+asic-clean:
+	$(call ORFS_RUN,clean_all)
+
+# Gate-level simulation: sky130 cell models are generated from the same liberty
+# synthesis used, then every software and ISA image runs on RTL and netlist.
+ASIC_CELLS := $(ASIC_WORK)/gls/sky130_cells.v
+GLS_IMAGES ?= $(addprefix $(SOFTWARE_BUILD_DIR)/,$(addsuffix .mem,$(BAREMETAL_PROGRAMS) $(BENCHMARK_PROGRAMS))) \
+	$(addprefix $(ISA_BUILD_DIR)/,$(addsuffix .mem,$(ISA_PROGRAMS)))
+$(ASIC_CELLS):
+	@mkdir -p $(@D)
+	docker run --rm -u $$(id -u):$$(id -g) -v $(REPO_ROOT):$(REPO_ROOT) $(ORFS_IMAGE) bash -c \
+		"source ./env.sh >/dev/null && yosys -q -p 'read_liberty -ignore_miss_func flow/platforms/sky130hd/lib/sky130_fd_sc_hd__tt_025C_1v80.lib; write_verilog -noattr $@'"
+.PHONY: asic-gls asic-lec
+asic-gls: $(ASIC_CELLS) software-images isa-images
+	asic/run_gls.sh $(ASIC_RESULTS)/1_2_yosys.v $(ASIC_CELLS) $(GLS_IMAGES)
+# Logic equivalence RTL vs netlist (eqy from oss-cad-suite).
+asic-lec: $(ASIC_CELLS)
+	asic/run_lec.sh $(ASIC_RESULTS)/1_2_yosys.v $(ASIC_CELLS)
