@@ -36,6 +36,7 @@ provenance and claim boundaries are recorded in
 | Directed performance | 35,245 instructions in 50,101 cycles; CPI 1.422, IPC 0.703 |
 | CoreMark | 2.127 CoreMark/MHz (CRC-valid performance run, CPI 1.642) |
 | Board bring-up | Released bitstream validated for boot, UART echo, GPIO, PASS/DONE, and both reset paths |
+| ASIC front-end | sky130hd core-only synthesis: 18,178 cells, 176,111 µm²; netlist 32/32 GLS match, LEC 23/24 partitions proven (pre-layout, `tt_025C_1v80`, 20 ns; [ASIC](docs/asic.md)) |
 
 The implementation, utilization, and power values above follow the updated
 Vivado captures in `docs/images/`. Archived report hashes and board validation
@@ -54,6 +55,7 @@ bitstream was implemented from clean commit `fc57a72` with
 - Brought up a 64 KiB TCM SoC with machine timer, UART, GPIO, completion mailbox, and a pinned FreeRTOS kernel.
 - Verified the design with directed RTL tests, bound SVA, software runs, two simulators, two external ISA suites, and FPGA deployment.
 - Tied every performance and hardware claim to reproducible counters, frozen reports, or hashed artifacts.
+- Took the same RTL through a sky130 ASIC front-end (synthesis, STA, gate-level simulation, LEC); gate-level simulation exposed a power-on reset hang that FPGA GSR and RTL X-optimism hide, fixed with a `por_i` input.
 
 ## Quick start
 
@@ -110,6 +112,7 @@ its value, while writes to read-only ID CSRs still trap.
 | `make fpga-freertos-images` | Build the 75 MHz, 250 ms-blink FreeRTOS board image |
 | `make benchmark` / `make coremark` | Directed CPI/IPC workloads and CoreMark; reports go to `build/generated-reports/` |
 | `make act4` | Separate Sail-backed ACT4 RV32I/RV32M suite (47 tests) |
+| `make asic-synth` / `make asic-sta` / `make asic-gls` / `make asic-lec` | sky130hd ASIC front-end in Docker (OpenROAD-flow-scripts); see [ASIC](docs/asic.md) |
 | `make questa-check` / `make questa-freertos-run` | Local Questa cross-checks |
 | `make <testbench>` | Run one test, for example `make tb_div_unit` |
 | `make help` | All targets and tool overrides |
@@ -189,6 +192,7 @@ Details: [Software](docs/software.md).
 | Assertions | Memory-protocol, retirement, and interrupt SVA | `make assertions` | ✓ |
 | Independent ISA | 47 ACT4 4.0.0 RV32I/RV32M tests against Sail | `make act4` | ✓ |
 | Cross-simulator | Curated RTL portfolio and FreeRTOS on Questa | `make questa-check` | ✓ |
+| Netlist | sky130 gate-level simulation vs RTL and logic equivalence (eqy) | `make asic-gls` / `make asic-lec` | — |
 
 CI runs `make test` on every push and pull request, and runs ACT4 when the
 RTL, assertions, ACT4 configuration, or Makefile change. Pass/fail comes from
@@ -251,10 +255,11 @@ files/           Ordered RTL source lists (core, integration, unit, FPGA)
 sim/questa/      Questa batch flow and curated waveform setups
 scripts/vivado/  Clocking Wizard creation and implementation-report export
 tools/           ELF/binary-to-memory converters and benchmark/CoreMark runners
-constraint/      A7-Lite board constraints (XDC)
+constraints/     A7-Lite board constraints (XDC)
+asic/            sky130hd wrapper, SDC, ORFS config, STA/GLS/LEC scripts
 verification/    ACT4 DUT configuration and runner
 third_party/     Pinned riscv-tests, FreeRTOS kernel, and CoreMark sources
-docs/            Architecture, verification, software, performance, and FPGA documentation
+docs/            Architecture, verification, software, performance, FPGA, and ASIC documentation
 ```
 
 ## Documentation
@@ -270,6 +275,7 @@ requirement-to-evidence flow, and reading paths for different reviewers.
 | [Software](docs/software.md) | Runtime, BSP, FreeRTOS port, memory layout, build flow |
 | [Performance](docs/performance.md) · [CoreMark](docs/coremark.md) | Methodology, counters, and results |
 | [FPGA](docs/fpga.md) | Board integration, Vivado flow, implementation results, bring-up |
+| [ASIC](docs/asic.md) | sky130hd front-end flow, pre-layout results, GLS/LEC, RTL findings |
 | [Hardware validation](docs/hardware-validation.md) | Evidence provenance, artifact hashes, claim boundary |
 | [Waveform debug](docs/waveform-debug.md) | Questa waveform workflow and annotated captures |
 | [Release checklist](docs/release-checklist.md) | Release gates and final commands |
@@ -283,7 +289,8 @@ This is an engineering-prototype core and SoC with a routed and board-validated
 75 MHz implementation point. It does not implement U/S modes, PMP, an MMU,
 caches, compressed instructions, or software/external interrupt controllers.
 It does **not** claim RISC-V certification, EEMBC certification, measured
-power, FPGA Fmax, PVT closure, or silicon qualification.
+power, FPGA Fmax, PVT closure, or silicon qualification. The sky130 flow is a
+front-end study only: no layout, no post-route timing, and no tape-out claim.
 
 ## License
 

@@ -21,6 +21,7 @@ software contract, and FPGA integration behind those claims.
 [Performance](performance.md) ·
 [CoreMark](coremark.md) ·
 [FPGA](fpga.md) ·
+[ASIC](asic.md) ·
 [Hardware validation](hardware-validation.md) ·
 [Release checklist](release-checklist.md) ·
 [Waveforms](waveform-debug.md)
@@ -60,6 +61,7 @@ and verification result from being mistaken for one another.
 | [Performance](performance.md) | **How does the core behave across directed workloads?** Complete-run instruction counts, cycles, CPI/IPC, and stall diagnostics |
 | [CoreMark](coremark.md) | **What is the measured CoreMark result?** Source provenance, build configuration, CRC validation, CoreMark/MHz, CPI/IPC, and bottleneck counters |
 | [FPGA implementation](fpga.md) | **How is the design realized and observed on hardware?** Board boundary, reset, TCM initialization, XDC, Vivado flow, implementation results, bring-up, and the public hardware-evidence boundary |
+| [ASIC front-end](asic.md) | **Does the synthesized netlist preserve the RTL?** sky130hd wrapper and constraints, synthesis area, pre-layout timing, gate-level simulation, logic equivalence, and RTL findings such as the power-on reset fix |
 | [Hardware validation](hardware-validation.md) | **What evidence is currently supported?** Functional and performance records, post-route FreeRTOS implementation, board observation, artifact hashes, and the published `v1.0.0` release package |
 | [Release checklist](release-checklist.md) | **How is a release published?** Clean-source, implementation, artifact, board, and GitHub release gates, closed for `v1.0.0` |
 | [Waveform debug](waveform-debug.md) | **How are cycle-level failures inspected?** Questa commands, curated signal groups, full-core waveform reading, capture procedure, and evidence policy |
