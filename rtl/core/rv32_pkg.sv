@@ -235,28 +235,32 @@ package rv32_pkg;
   localparam word_t MIP_IMPLEMENTED_MASK = MIP_MTIP_MASK;
   localparam word_t MIP_WRITABLE_MASK    = 32'b0;
 
-  // mcause[XLEN-1] distinguishes interrupts; five code bits cover this scope.
-  localparam int unsigned TRAP_CAUSE_W = 5;
+  // mcause[XLEN-1] distinguishes interrupts. Hardware only raises codes up to
+  // 11, so traps travel down the pipeline with four code bits; a fifth bit would
+  // be a constant-0 flop in every stage. The mcause CSR keeps a five-bit
+  // software-writable (WLRL) code field, and trace/CSR ports stay five bits.
+  localparam int unsigned TRAP_CAUSE_W  = 4;
+  localparam int unsigned MCAUSE_CODE_W = 5;
   typedef logic [TRAP_CAUSE_W-1:0] trap_cause_t;
 
   localparam int unsigned MCAUSE_INTERRUPT_BIT  = XLEN - 1;
   localparam word_t       MCAUSE_INTERRUPT_MASK = 32'h8000_0000;
   localparam word_t       MCAUSE_CODE_MASK      = 32'h0000_001f;
-  localparam trap_cause_t IRQ_M_TIMER_CAUSE     = 5'd7;
+  localparam trap_cause_t IRQ_M_TIMER_CAUSE     = 4'd7;
   localparam word_t       MCAUSE_M_TIMER_VALUE  = 32'h8000_0007;
   /* verilator lint_on UNUSEDPARAM */
 
   // Standard synchronous exception cause values.
   typedef enum trap_cause_t {
-    EXC_INST_ADDR_MISALIGNED  = 5'd0,
-    EXC_INST_ACCESS_FAULT     = 5'd1,
-    EXC_ILLEGAL_INSN          = 5'd2,
-    EXC_BREAKPOINT            = 5'd3,
-    EXC_LOAD_ADDR_MISALIGNED  = 5'd4,
-    EXC_LOAD_ACCESS_FAULT     = 5'd5,
-    EXC_STORE_ADDR_MISALIGNED = 5'd6,
-    EXC_STORE_ACCESS_FAULT    = 5'd7,
-    EXC_ECALL_M               = 5'd11
+    EXC_INST_ADDR_MISALIGNED  = 4'd0,
+    EXC_INST_ACCESS_FAULT     = 4'd1,
+    EXC_ILLEGAL_INSN          = 4'd2,
+    EXC_BREAKPOINT            = 4'd3,
+    EXC_LOAD_ADDR_MISALIGNED  = 4'd4,
+    EXC_LOAD_ACCESS_FAULT     = 4'd5,
+    EXC_STORE_ADDR_MISALIGNED = 4'd6,
+    EXC_STORE_ACCESS_FAULT    = 4'd7,
+    EXC_ECALL_M               = 4'd11
   } exc_cause_e;
 
   // Shared control and pipeline bundles
