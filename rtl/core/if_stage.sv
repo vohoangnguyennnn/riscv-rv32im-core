@@ -6,6 +6,9 @@ module if_stage #(
 ) (
   input  logic           clk_i,
   input  logic           rst_i,
+  // Power-on reset, asserted together with rst_i after power-up: flops start
+  // random, so no accepted request can exist and the reset drain is skipped.
+  input  logic           por_i,
   input  logic           enable_i,
   input  logic           consume_i,
   input  logic           flush_i,
@@ -276,7 +279,7 @@ module if_stage #(
 
       // A request accepted before reset cannot be cancelled. Drain its single
       // response before restarting from RESET_VECTOR.
-      if ((state_q == IF_BUSY) && request_sent_q && !imem_m.rsp_valid) begin
+      if (!por_i && (state_q == IF_BUSY) && request_sent_q && !imem_m.rsp_valid) begin
         state_q        <= IF_BUSY;
         request_sent_q <= 1'b1;
         discard_q      <= 1'b1;

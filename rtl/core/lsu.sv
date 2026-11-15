@@ -4,6 +4,9 @@
 module lsu (
   input  logic                     clk_i,
   input  logic                     rst_i,
+  // Power-on reset, asserted together with rst_i after power-up: flops start
+  // random, so no accepted request can exist and the reset drain is skipped.
+  input  logic                     por_i,
   input  logic                     kill_i,
 
   input  logic                     req_valid_i,
@@ -221,7 +224,7 @@ module lsu (
 
       // A request accepted before reset cannot be cancelled. Drain its single
       // response before accepting a new pipeline memory operation.
-      if ((state_q == LSU_BUSY) && request_sent_q && !dmem_m.rsp_valid) begin
+      if (!por_i && (state_q == LSU_BUSY) && request_sent_q && !dmem_m.rsp_valid) begin
         state_q        <= LSU_BUSY;
         request_sent_q <= 1'b1;
         discard_q      <= 1'b1;

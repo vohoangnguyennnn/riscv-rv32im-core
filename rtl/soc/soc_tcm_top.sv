@@ -28,6 +28,8 @@ module soc_tcm_top #(
 ) (
   input  logic        clk_i,
   input  logic        rst_i,
+  // Power-on reset for the core (see rv32_core); tie 0 on FPGA.
+  input  logic        por_i,
 
   input  logic        uart_rx_i,
   output logic        uart_tx_o,
@@ -98,6 +100,7 @@ module soc_tcm_top #(
   ) u_core (
     .clk_i              (clk_i),
     .rst_i              (rst_i),
+    .por_i              (por_i),
     .mtip_i             (mtip),
     .imem_m             (imem),
     .dmem_m             (core_dmem),
