@@ -65,6 +65,19 @@ module csr_file #(
   logic access_cmd_legal;
   logic access_writes;
 
+  // Only CSR bits that can change are stored. Every other bit of mstatus, mie
+  // and mcause is a constant (RO0 or single-value WARL), so the *_q words are
+  // rebuilt from the stored bits instead of holding 32 flops each.
+  logic                    mstatus_mie_q;
+  logic                    mstatus_mpie_q;
+  logic                    mie_mtie_q;
+  logic                    mcause_irq_q;
+  logic [MCAUSE_CODE_W-1:0] mcause_code_q;
+
+  assign mstatus_q = MSTATUS_MPP_M_VALUE | (mstatus_mie_q  ? MSTATUS_MIE_MASK  : 32'b0) | (mstatus_mpie_q ? MSTATUS_MPIE_MASK : 32'b0);
+  assign mie_q     = mie_mtie_q ? MIE_MTIE_MASK : 32'b0;
+  assign mcause_q  = {mcause_irq_q, {(XLEN-1-MCAUSE_CODE_W){1'b0}}, mcause_code_q};
+
   assign mtvec_o   = mtvec_q;
   assign mepc_o    = mepc_q;
   assign mip_value = mtip_i ? MIP_MTIP_MASK : 32'b0;
@@ -275,22 +288,26 @@ module csr_file #(
 
   always_ff @(posedge clk_i) begin
     if (rst_i) begin
-      mstatus_q  <= MSTATUS_RESET_VALUE;
-      mie_q      <= MIE_RESET_VALUE;
+      mstatus_mie_q  <= MSTATUS_RESET_VALUE[MSTATUS_MIE_BIT];
+      mstatus_mpie_q <= MSTATUS_RESET_VALUE[MSTATUS_MPIE_BIT];
+      mie_mtie_q     <= MIE_RESET_VALUE[MINT_MTIP_BIT];
       mtvec_q    <= {TRAP_VECTOR[31:2], 2'b00};
       mscratch_q <= 32'b0;
       mepc_q     <= 32'b0;
-      mcause_q   <= 32'b0;
+      mcause_irq_q   <= 1'b0;
+      mcause_code_q  <= '0;
       mtval_q    <= 32'b0;
       mcycle_q   <= 64'b0;
       minstret_q <= 64'b0;
     end else begin
-      mstatus_q  <= mstatus_d;
-      mie_q      <= mie_d;
+      mstatus_mie_q  <= mstatus_d[MSTATUS_MIE_BIT];
+      mstatus_mpie_q <= mstatus_d[MSTATUS_MPIE_BIT];
+      mie_mtie_q     <= mie_d[MINT_MTIP_BIT];
       mtvec_q    <= mtvec_d;
       mscratch_q <= mscratch_d;
       mepc_q     <= mepc_d;
-      mcause_q   <= mcause_d;
+      mcause_irq_q   <= mcause_d[MCAUSE_INTERRUPT_BIT];
+      mcause_code_q  <= mcause_d[MCAUSE_CODE_W-1:0];
       mtval_q    <= mtval_d;
       mcycle_q   <= mcycle_d;
       minstret_q <= minstret_d;
