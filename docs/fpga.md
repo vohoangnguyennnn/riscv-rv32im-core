@@ -410,13 +410,13 @@ remain archived results until new text reports are exported.
 | Gate | Result and evidence |
 |---|---|
 | Placement and routing | Archived release: fully routed; zero unrouted or partially routed nets |
-| Setup timing at 75 MHz | MET; WNS `+0.095 ns`, TNS `0.000 ns` |
-| Hold timing | MET; WHS `+0.084 ns`, THS `0.000 ns` |
+| Setup timing at 75 MHz | MET; WNS `+0.215 ns`, TNS `0.000 ns` |
+| Hold timing | MET; WHS `+0.086 ns`, THS `0.000 ns` |
 | Pulse width | MET; worst slack `+5.537 ns` |
 | Internal timing coverage | Archived release: 0 unclocked registers, 0 unconstrained endpoints, 0 combinational loops |
 | DRC | Archived release: 0 errors; 8 reviewed DSP pipelining advisories |
 | Bitstream | Archived release: generated successfully |
-| Power estimate | 0.252 W total, Medium confidence |
+| Power estimate | 0.251 W total, Medium confidence |
 
 The small positive margin supports this implemented 75 MHz point only; it is
 not an Fmax result.
@@ -432,16 +432,16 @@ not an Fmax result.
 </p>
 
 <p align="center"><em>FreeRTOS post-route timing summary for the current
-75 MHz implementation, with 6,892 setup and hold endpoints and no timing
+75 MHz implementation, with 6,884 setup and hold endpoints and no timing
 violations. Archived text-report hashes identify the earlier release.</em></p>
 
 Resource use is:
 
 | Resource | Used / available | Utilization |
 |---|---:|---:|
-| Slice LUTs | 3,751 / 20,800 | 18.03% |
-| Slice registers | 2,003 / 41,600 | 4.81% |
-| Slices | 1,141 / 8,150 | 14.00% |
+| Slice LUTs | 3,788 / 20,800 | 18.21% |
+| Slice registers | 2,001 / 41,600 | 4.81% |
+| Slices | 1,132 / 8,150 | 13.89% |
 | Block RAM tiles | 16 / 50 | 32.00% |
 | DSP48E1 | 4 / 90 | 4.44% |
 | Bonded I/O | 10 / 250 | 4.00% |
@@ -512,7 +512,7 @@ Reviewed evidence is:
 | Metrics and disposition | [Hardware validation §5](hardware-validation.md#5-post-route-implementation-results) |
 | Artifact hashes | [Hardware validation §7](hardware-validation.md#7-artifact-identity) |
 
-The latest post-route estimate is 0.252 W: 0.179 W dynamic and 0.073 W device
+The latest post-route estimate is 0.251 W: 0.179 W dynamic and 0.073 W device
 static, with a 25.7 °C estimated junction temperature. Vivado rates confidence
 as Medium because I/O and internal-node activity are incompletely specified.
 It is a vectorless estimate, not measured board power and not a FreeRTOS

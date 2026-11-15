@@ -30,9 +30,9 @@ provenance and claim boundaries are recorded in
 | Software | 2/2 bare-metal programs and the FreeRTOS V11.3.0 demo pass on Verilator and Questa |
 | ISA suites | 40 RV32I + 8 RV32M pinned `riscv-tests`; 39 RV32I + 8 RV32M ACT4 4.0.0 (Sail-backed) |
 | FPGA target | MicroPhase A7-Lite R1.1, AMD/Xilinx Artix-7 `xc7a35tfgg484-2` |
-| Implementation | Vivado 2024.1, fully routed at 75 MHz; setup WNS +0.095 ns, hold WHS +0.084 ns |
-| Utilization | 3,751 LUT (18.03%), 2,003 FF (4.81%), 16 BRAM (32.00%), 4 DSP (4.44%), 10 bonded I/O |
-| Power | 0.252 W vectorless post-route estimate, Medium confidence; not board-measured |
+| Implementation | Vivado 2024.1, fully routed at 75 MHz; setup WNS +0.215 ns, hold WHS +0.086 ns |
+| Utilization | 3,788 LUT (18.21%), 2,001 FF (4.81%), 16 BRAM (32.00%), 4 DSP (4.44%), 10 bonded I/O |
+| Power | 0.251 W vectorless post-route estimate, Medium confidence; not board-measured |
 | Directed performance | 35,245 instructions in 50,101 cycles; CPI 1.422, IPC 0.703 |
 | CoreMark | 2.127 CoreMark/MHz (CRC-valid performance run, CPI 1.642) |
 | Board bring-up | Released bitstream validated for boot, UART echo, GPIO, PASS/DONE, and both reset paths |
@@ -209,7 +209,7 @@ clock in one functional clock domain. Firmware is loaded through
 bitstream-initialized TCM block RAM. Board observability comprises heartbeat
 and PASS LEDs, DONE/FAIL outputs on JP2, the CH340 UART, and GPIO output bit 0.
 
-The updated Vivado timing capture shows all 6,892 setup/hold endpoints meeting
+The updated Vivado timing capture shows all 6,884 setup/hold endpoints meeting
 timing at the 75 MHz target. The small positive setup margin is a
 closure point, not a device Fmax claim.
 
