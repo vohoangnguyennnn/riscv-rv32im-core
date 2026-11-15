@@ -43,6 +43,7 @@ module tb_rv32_core;
   rv32_core dut (
     .clk_i              (clk),
     .rst_i              (rst),
+    .por_i              (1'b0),
     .mtip_i             (1'b0),
     .imem_m             (imem),
     .dmem_m             (dmem),
@@ -184,7 +185,7 @@ module tb_rv32_core;
           if (
             (trace_pc != 32'h0000_005c) ||
             (trace_insn != 32'hffff_ffff) ||
-            (trace_cause != rv32_pkg::EXC_ILLEGAL_INSN)
+            (trace_cause != 5'(rv32_pkg::EXC_ILLEGAL_INSN))
           ) begin
             $fatal(
               1,

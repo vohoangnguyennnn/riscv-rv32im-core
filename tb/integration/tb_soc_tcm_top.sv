@@ -62,6 +62,7 @@ module tb_soc_tcm_top;
   ) dut (
     .clk_i              (clk),
     .rst_i              (rst),
+    .por_i              (1'b0),
     .uart_rx_i          (uart_rx),
     .uart_tx_o          (uart_tx),
     .gpio_in_i          (gpio_in),
@@ -305,7 +306,7 @@ module tb_soc_tcm_top;
         if (phase == 5) begin
           check_bit(trace_is_interrupt, 1'b1,
                     "timer trap interrupt qualifier");
-          check_word({27'b0, trace_cause}, {27'b0, IRQ_M_TIMER_CAUSE},
+          check_word({27'b0, trace_cause}, 32'(IRQ_M_TIMER_CAUSE),
                      "timer trap cause");
           saw_timer_trap = 1'b1;
         end else if (phase != 3) begin
@@ -385,7 +386,7 @@ module tb_soc_tcm_top;
       if (trace_valid && trace_trap) begin
         check_word(trace_pc, 32'h0000_0000, "illegal trap PC");
         check_word(trace_insn, 32'hffff_ffff, "illegal trap instruction");
-        check_word({27'b0, trace_cause}, {27'b0, EXC_ILLEGAL_INSN}, "illegal trap cause");
+        check_word({27'b0, trace_cause}, 32'(EXC_ILLEGAL_INSN), "illegal trap cause");
         saw_expected_trap = 1'b1;
         break;
       end

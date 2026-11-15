@@ -32,6 +32,7 @@ module tb_if_stage;
   ) dut (
     .clk_i            (clk),
     .rst_i            (rst),
+    .por_i            (1'b0),
     .enable_i         (enable),
     .consume_i        (consume),
     .flush_i          (flush),
