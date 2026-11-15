@@ -137,6 +137,7 @@ tests; they do not constitute formal proof or functional/code coverage closure.
 | Requests remain stable under backpressure | `tb_if_stage`, `tb_lsu`, `tb_pipeline_memory_wait`, protocol assertions |
 | Delayed responses cannot duplicate retirement | `tb_pipeline_memory_wait`, retirement assertions |
 | Redirected, killed, or pre-reset responses are drained | IF and LSU unit tests, `tb_soc_reset`, control-flow scenarios, protocol assertions |
+| After power-up (`por_i` with `rst_i`), IF/LSU reset to idle without draining | Manual `force -deposit` replay of the worst power-up state on the RTL with `asic/tb_gls.sv`; netlist covered by random-init gate-level simulation ([ASIC §6.1](asic.md#61-power-on-hang-in-the-iflsu-reset-drain)); not yet in `make test` |
 | Older waits, faults, and traps defeat younger redirects | `tb_pipeline_ctrl`, `tb_core_control_flow` |
 | MTIP waits only for unresolved older interrupt-state writers | `tb_timer_interrupt_core`, interrupt assertions |
 | Enabling/disabling CSR commits affect MTIP without a shadow instruction | `tb_timer_interrupt_core`, interrupt assertions |
@@ -292,6 +293,20 @@ disabled because the core implements only the documented M-mode subset.
 <p align="center"><em>ACT4 4.0.0 independent architectural regression:
 47 self-checking RV32I/RV32M tests complete successfully.</em></p>
 
+### 7.4 RTL-to-netlist checks (ASIC front-end)
+
+The sky130hd flow in [ASIC](asic.md) adds two checks below RTL. They show that
+the synthesized netlist preserves the RTL; neither shows that the RTL meets
+the specification, which remains the job of the suites above.
+
+| Check | Method | Current result |
+|---|---|---|
+| Gate-level simulation | Same testbench on RTL and netlist; PASS and identical cycle count required; flops start at random 0/1 values; X on bus control is fatal | 32/32 programs match (zero-delay, seed 1) |
+| Logic equivalence | eqy pairs registers by name and proves each combinational partition | 23/24 partitions proven; one partition passes basecase but induction does not close |
+
+These checks run through `make asic-gls` and `make asic-lec`; they are not part
+of `make test` or CI because they need the ORFS Docker image and Questa.
+
 ## 8. Regression operation and failure triage
 
 | Command | Purpose |
@@ -355,4 +370,6 @@ For a change that affects architectural or SoC behavior:
 - retirement-stream differential testing against an independent ISA model;
 - constrained-random collision testing and functional/code coverage closure;
 - formal proof of selected control and memory-protocol properties;
-- complete privileged-architecture conformance beyond the implemented subset.
+- complete privileged-architecture conformance beyond the implemented subset;
+- a regression test for the power-on reset replay in `tb_if_stage`/`tb_lsu`;
+- closing the last logic-equivalence partition and running the long benchmark programs on the netlist.
