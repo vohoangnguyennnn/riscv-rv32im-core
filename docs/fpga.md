@@ -402,7 +402,8 @@ clean implementation commit `fc57a72`, top `fpga_top`, and
 evidence archive are attached to the [`v1.0.0` release](https://github.com/vohoangnguyennnn/riscv-rv32im-core/releases/tag/v1.0.0).
 
 The timing, utilization, and power values below follow the updated Vivado
-captures supplied on 2026-11-04. The archived package above identifies the
+captures from 2026-11-16 (non-incremental run after the `por_i` RTL change).
+The archived package above identifies the
 earlier release; its report hashes and board results do not identify this new
 implementation. Routing, coverage, DRC, bitstream, and methodology findings
 remain archived results until new text reports are exported.

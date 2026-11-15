@@ -146,7 +146,8 @@ clock. They are not FPGA wall-clock measurements.
 ## 5. Post-route implementation results
 
 The timing, utilization, and power figures in this section follow the updated
-Vivado captures supplied on 2026-11-04. The provenance in Section 2, report
+Vivado captures from 2026-11-16 (Vivado 2024.1, non-incremental run after the
+`por_i` RTL change). The provenance in Section 2, report
 hashes in Section 7, and board-validation results identify the earlier
 `v1.0.0` package. New text reports, source identity, and bitstream hashes have
 not yet been recorded for the updated captures.
