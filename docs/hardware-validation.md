@@ -157,12 +157,12 @@ not yet been recorded for the updated captures.
 |---|---:|
 | Board clock | 50 MHz / 20.000 ns |
 | Generated SoC clock | 75 MHz / 13.333 ns |
-| Setup WNS / TNS | +0.095 ns / 0.000 ns |
-| Setup failing endpoints | 0 / 6,892 |
-| Hold WHS / THS | +0.084 ns / 0.000 ns |
-| Hold failing endpoints | 0 / 6,892 |
+| Setup WNS / TNS | +0.215 ns / 0.000 ns |
+| Setup failing endpoints | 0 / 6,884 |
+| Hold WHS / THS | +0.086 ns / 0.000 ns |
+| Hold failing endpoints | 0 / 6,884 |
 | Worst pulse-width slack / TPWS | +5.537 ns / 0.000 ns |
-| Pulse-width failing endpoints | 0 / 2,129 |
+| Pulse-width failing endpoints | 0 / 2,127 |
 | Unclocked sequential pins | Archived release: 0; new report pending |
 | Unconstrained internal paths | Archived release: 0; new report pending |
 | Combinational loops | Archived release: 0; new report pending |
@@ -185,11 +185,11 @@ positive setup, hold, and pulse-width slack.</em></p>
 
 | Resource | Used / available | Utilization |
 |---|---:|---:|
-| Slice LUTs | 3,751 / 20,800 | 18.03% |
-| LUT as logic | 3,707 / 20,800 | 17.82% |
+| Slice LUTs | 3,788 / 20,800 | 18.21% |
+| LUT as logic | 3,744 / 20,800 | 18.00% |
 | LUT as memory | 44 / 9,600 | 0.46% |
-| Slice registers | 2,003 / 41,600 | 4.81% |
-| Slices | 1,141 / 8,150 | 14.00% |
+| Slice registers | 2,001 / 41,600 | 4.81% |
+| Slices | 1,132 / 8,150 | 13.89% |
 | Block RAM tiles | 16 / 50 | 32.00% |
 | DSP48E1 | 4 / 90 | 4.44% |
 | Bonded I/O | 10 / 250 | 4.00% |
@@ -215,14 +215,14 @@ a production reset-safety waiver.
   </a>
 </p>
 
-<p align="center"><em>The implementation uses 3,751 LUTs, 2,003 registers,
+<p align="center"><em>The implementation uses 3,788 LUTs, 2,001 registers,
 16 BRAM tiles, four DSPs, and all ten constrained board I/O ports.</em></p>
 
 ### 5.3 Power estimate
 
 | Metric | Post-route estimate |
 |---|---:|
-| Total on-chip power | 0.252 W |
+| Total on-chip power | 0.251 W |
 | Dynamic | 0.179 W |
 | Device static | 0.073 W |
 | Junction / ambient temperature | 25.7 °C / 25.0 °C |
@@ -237,7 +237,7 @@ does not model observed FreeRTOS workload activity with a VCD/SAIF file.
   </a>
 </p>
 
-<p align="center"><em>The 0.252 W result has Medium confidence and remains an
+<p align="center"><em>The 0.251 W result has Medium confidence and remains an
 implementation estimate, not a physical power measurement.</em></p>
 
 ## 6. I/O and physical-board validation

@@ -66,7 +66,7 @@ bind rv32_core rv32_core_interrupt_sva u_interrupt_sva (
   .id_ex_insn_i             (id_ex_q.insn),
   .id_ex_exc_valid_i        (id_ex_q.exc.valid),
   .id_ex_exc_interrupt_i    (id_ex_q.exc.is_interrupt),
-  .id_ex_exc_cause_i        (id_ex_q.exc.cause),
+  .id_ex_exc_cause_i        (5'(id_ex_q.exc.cause)),
   .id_ex_exc_tval_i         (id_ex_q.exc.tval),
   .id_ex_ctrl_zero_i        (id_ex_q.ctrl == '0)
 );

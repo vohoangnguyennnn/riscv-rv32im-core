@@ -10,6 +10,10 @@ module rv32_core #(
 ) (
   input  logic clk_i,
   input  logic rst_i,
+  // Power-on reset: assert together with rst_i after power-up (tie 0 where
+  // flops are initialised by configuration, e.g. FPGA GSR). Lets IF/LSU skip
+  // the warm-reset response drain, which would act on random power-up state.
+  input  logic por_i,
 
   // Live MTIP level; committed MIE/MTIE state controls eligibility.
   input  logic mtip_i,
@@ -228,7 +232,7 @@ module rv32_core #(
     .trap_valid_i       (wb_trap),
     .trap_pc_i          (mem_wb_q.pc),
     .trap_is_interrupt_i(mem_wb_q.exc.is_interrupt),
-    .trap_cause_i       (mem_wb_q.exc.cause),
+    .trap_cause_i       (5'(mem_wb_q.exc.cause)),
     .trap_tval_i        (mem_wb_q.exc.tval),
     .mtip_i             (mtip_i),
     .mtvec_o            (csr_mtvec),
@@ -249,7 +253,7 @@ module rv32_core #(
     trace_mem_wstrb_o  = mem_wb_q.mem_wstrb;
     trace_mem_wdata_o  = mem_wb_q.mem_wdata;
     trace_trap_o       = wb_trap;
-    trace_cause_o      = wb_trap ? mem_wb_q.exc.cause : 5'b0;
+    trace_cause_o      = wb_trap ? 5'(mem_wb_q.exc.cause) : 5'b0;
     trace_is_interrupt_o = wb_trap ? mem_wb_q.exc.is_interrupt : 1'b0;
     trace_control_o    = wb_retire && mem_wb_q.control;
     trace_taken_o      = wb_retire && mem_wb_q.control_taken;
@@ -264,6 +268,7 @@ module rv32_core #(
   ) u_if_stage (
     .clk_i            (clk_i),
     .rst_i            (rst_i),
+    .por_i            (por_i),
     .enable_i         (pc_enable),
     .consume_i        (fetch_consume),
     .flush_i          (if_id_flush),
@@ -444,6 +449,7 @@ module rv32_core #(
   lsu u_lsu (
     .clk_i             (clk_i),
     .rst_i             (rst_i),
+    .por_i             (por_i),
     .kill_i            (wb_trap),
     .req_valid_i       (lsu_req_valid),
     .req_ready_o       (),

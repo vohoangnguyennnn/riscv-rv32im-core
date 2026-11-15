@@ -103,6 +103,7 @@ module fpga_top #(
   ) u_soc (
     .clk_i              (clk_75m),
     .rst_i              (soc_rst),
+    .por_i              (1'b0),   // configuration (GSR) initialises every flop
     .uart_rx_i          (uart_rx_i),
     .uart_tx_o          (uart_tx),
     .gpio_in_i          (32'b0),

@@ -500,6 +500,15 @@ the protocol bookkeeping needed to discard that response and suppresses new
 issue until the drain completes. A replacement memory system must therefore
 preserve exactly one response for every accepted request across core reset.
 
+The drain decision reads IF/LSU state captured before reset, which is only
+meaningful for a warm reset. After power-up that state is arbitrary on silicon
+and could request a drain for a transaction that never existed, leaving the
+core waiting forever. `rv32_core` and `soc_tcm_top` therefore take a
+synchronous, active-high `por_i` that must be asserted together with `rst_i`
+after power-up; while it is high, IF and LSU reset to idle without draining.
+Targets whose flops are initialised by configuration tie it low (the FPGA
+wrapper relies on GSR); an ASIC drives it from its power-on-reset circuit.
+
 The current SoC data targets all respond one cycle after acceptance. Its demux
 blocks new requests during reset but forwards an already-owned response, so
 the LSU can drain it at the reset edge before demux ownership is cleared.

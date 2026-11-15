@@ -65,6 +65,7 @@ module tb_freertos_soc;
   ) dut (
     .clk_i              (clk),
     .rst_i              (rst),
+    .por_i              (1'b0),
     .uart_rx_i          (uart_rx),
     .uart_tx_o          (uart_tx),
     .gpio_in_i          (gpio_in),

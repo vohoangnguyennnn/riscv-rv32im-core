@@ -73,6 +73,7 @@ module tb_core_control_flow;
   ) dut (
     .clk_i             (clk),
     .rst_i             (rst),
+    .por_i             (1'b0),
     .mtip_i            (1'b0),
     .imem_m            (imem),
     .dmem_m            (dmem),
@@ -430,13 +431,13 @@ module tb_core_control_flow;
           unique case (trap_count)
             0: begin
               check_word(trace_pc, misaligned_pc, "misaligned trap PC");
-              check_word({27'b0, trace_cause}, {27'b0, EXC_INST_ADDR_MISALIGNED}, "misaligned trap cause");
+              check_word({27'b0, trace_cause}, 32'(EXC_INST_ADDR_MISALIGNED), "misaligned trap cause");
               check_word(trace_target, misaligned_target, "misaligned trap target metadata");
             end
 
             1: begin
               check_word(trace_pc, mem_fault_pc, "load access-fault PC");
-              check_word({27'b0, trace_cause}, {27'b0, EXC_LOAD_ACCESS_FAULT}, "load access-fault cause");
+              check_word({27'b0, trace_cause}, 32'(EXC_LOAD_ACCESS_FAULT), "load access-fault cause");
             end
 
             default: $fatal(1, "unexpected extra trap at pc=%08x", trace_pc);
@@ -488,8 +489,8 @@ module tb_core_control_flow;
           end
 
           expected_handler_cause = (trap_count == 1)
-                                 ? EXC_INST_ADDR_MISALIGNED
-                                 : EXC_LOAD_ACCESS_FAULT;
+                                 ? 5'(EXC_INST_ADDR_MISALIGNED)
+                                 : 5'(EXC_LOAD_ACCESS_FAULT);
           expected_handler_tval  = (trap_count == 1)
                                  ? misaligned_target
                                  : 32'h0000_1000;

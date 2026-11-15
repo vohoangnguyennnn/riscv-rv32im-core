@@ -68,6 +68,7 @@ module tb_pipeline_forwarding;
   rv32_core dut (
     .clk_i             (clk),
     .rst_i             (rst),
+    .por_i             (1'b0),
     .mtip_i            (1'b0),
     .imem_m            (imem),
     .dmem_m            (dmem),

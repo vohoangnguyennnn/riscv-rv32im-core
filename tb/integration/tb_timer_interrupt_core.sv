@@ -43,6 +43,7 @@ module tb_timer_interrupt_core;
   ) dut (
     .clk_i                   (clk),
     .rst_i                   (rst),
+    .por_i                   (1'b0),
     .mtip_i                  (mtip),
     .imem_m                  (imem),
     .dmem_m                  (dmem),
@@ -228,7 +229,7 @@ module tb_timer_interrupt_core;
 
         if (trace_valid) begin
           if (trace_trap) begin
-            check_word({27'b0, trace_cause}, {27'b0, IRQ_M_TIMER_CAUSE},
+            check_word({27'b0, trace_cause}, 32'(IRQ_M_TIMER_CAUSE),
                        "pending-enable timer cause");
             check_bit(trace_is_interrupt, 1'b1,
                       "pending-enable interrupt qualifier");
@@ -398,7 +399,7 @@ module tb_timer_interrupt_core;
             check_bit(div_retired, 1'b1, "DIV retires before younger interrupt");
             check_bit(trace_is_interrupt, 1'b1,
                       "DIV race interrupt qualifier");
-            check_word({27'b0, trace_cause}, {27'b0, IRQ_M_TIMER_CAUSE},
+            check_word({27'b0, trace_cause}, 32'(IRQ_M_TIMER_CAUSE),
                        "DIV race timer cause");
             check_word(trace_pc, 32'h0000_0018, "DIV race mepc");
             timer_trapped = 1'b1;
@@ -485,7 +486,7 @@ module tb_timer_interrupt_core;
           if (trace_trap) begin
             check_bit(trace_is_interrupt, 1'b1,
                       "redirect race interrupt qualifier");
-            check_word({27'b0, trace_cause}, {27'b0, IRQ_M_TIMER_CAUSE},
+            check_word({27'b0, trace_cause}, 32'(IRQ_M_TIMER_CAUSE),
                        "redirect race timer cause");
             check_word(trace_pc, 32'h0000_001c,
                        "redirect race retaken target PC");
@@ -560,7 +561,7 @@ module tb_timer_interrupt_core;
         if (trace_valid && trace_trap) begin
           check_bit(trace_is_interrupt, 1'b0,
                     "simultaneous trap remains synchronous");
-          check_word({27'b0, trace_cause}, {27'b0, EXC_ILLEGAL_INSN},
+          check_word({27'b0, trace_cause}, 32'(EXC_ILLEGAL_INSN),
                      "simultaneous illegal cause");
           check_word(trace_pc, 32'h0000_0018, "simultaneous illegal mepc");
           check_word(trace_insn, 32'hffff_ffff,
@@ -615,7 +616,7 @@ module tb_timer_interrupt_core;
         if (trace_valid && trace_trap) begin
           check_bit(trace_is_interrupt, 1'b0,
                     "trap-drain preserves older synchronous trap");
-          check_word({27'b0, trace_cause}, {27'b0, EXC_ILLEGAL_INSN},
+          check_word({27'b0, trace_cause}, 32'(EXC_ILLEGAL_INSN),
                      "trap-drain older cause");
           check_word(trace_pc, 32'h0000_0018, "trap-drain older mepc");
           trapped = 1'b1;

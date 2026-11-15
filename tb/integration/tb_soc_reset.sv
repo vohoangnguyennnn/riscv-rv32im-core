@@ -41,6 +41,7 @@ module tb_soc_reset;
   ) dut (
     .clk_i                   (clk),
     .rst_i                   (rst),
+    .por_i                   (1'b0),
     .uart_rx_i               (1'b1),
     .uart_tx_o               (uart_tx),
     .gpio_in_i               (32'b0),

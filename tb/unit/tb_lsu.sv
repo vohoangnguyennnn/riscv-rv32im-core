@@ -28,6 +28,7 @@ module tb_lsu;
   lsu dut (
     .clk_i           (clk),
     .rst_i           (rst),
+    .por_i           (1'b0),
     .kill_i          (kill),
     .req_valid_i     (req_valid),
     .req_ready_o     (req_ready),

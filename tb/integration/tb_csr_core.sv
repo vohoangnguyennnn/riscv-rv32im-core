@@ -41,6 +41,7 @@ module tb_csr_core;
   rv32_core dut (
     .clk_i              (clk),
     .rst_i              (rst),
+    .por_i              (1'b0),
     .mtip_i             (mtip),
     .imem_m             (imem),
     .dmem_m             (dmem),
@@ -219,7 +220,7 @@ module tb_csr_core;
           if (
             (trace_pc != 32'h0000_0028) ||
             (trace_insn != illegal_csr_insn) ||
-            (trace_cause != EXC_ILLEGAL_INSN) ||
+            (trace_cause != 5'(EXC_ILLEGAL_INSN)) ||
             trace_rd_we
           ) begin
             $fatal(
