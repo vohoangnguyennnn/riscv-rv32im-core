@@ -34,10 +34,10 @@ run() { # <lib> <image> <name> -> prints cycle count or FAIL
   local out
   # 7061: testbench preloads TCM memory (same waiver as the repo Questa flow).
   # 14408: Starter Edition capacity note (netlist > 5000 instances; slower, still correct).
-  # +initreg+0: every flop powers up 0, like an FPGA after configuration. Without
-  # it the IF/LSU reset-drain logic keeps power-on X state (see asic/README.md);
-  # GLS_INIT= (empty) runs the pessimistic power-on check instead.
-  out=$(vsim -c -quiet -suppress 7061,14408 ${GLS_INIT-"-voptargs=+initreg+0"} -lib "$1" tb_gls +mem="$2" +test="$3" -do "run -all; quit -f" 2>&1 | tee "$1.$3.log")
+  # Power-up model: every flop starts at a random 0/1 (seed GLS_SEED), as
+  # silicon does. Plain X would be wrong here: 4-state gate sim cannot resolve
+  # reconvergent X (t & !t), so correct reset logic would still look stuck at X.
+  out=$(vsim -c -quiet -suppress 7061,14408 -voptargs=+initreg +initreg+"${GLS_SEED:-1}" -lib "$1" tb_gls +mem="$2" +test="$3" -do "run -all; quit -f" 2>&1 | tee "$1.$3.log")
   grep -oP 'tb_gls: PASS \S+ \(\K[0-9]+' <<<"$out" || echo FAIL
 }
 

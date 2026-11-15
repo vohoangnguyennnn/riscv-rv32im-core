@@ -5,6 +5,8 @@
 module asic_core_top (
   input  logic        clk_i,
   input  logic        rst_i,
+  // From the chip's power-on-reset circuit; asserted together with rst_i.
+  input  logic        por_i,
   input  logic        mtip_i,
 
   output logic        imem_req_valid_o,
@@ -48,6 +50,7 @@ module asic_core_top (
   rv32_core u_core (
     .clk_i                (clk_i),
     .rst_i                (rst_i),
+    .por_i                (por_i),
     .mtip_i               (mtip_i),
     .imem_m               (imem),
     .dmem_m               (dmem),

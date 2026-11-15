@@ -16,6 +16,8 @@ module tb_gls;
 
   logic clk = 1'b0;
   logic rst = 1'b1;
+  // Power-up: the POR circuit asserts por together with rst.
+  logic por = 1'b1;
   always #5 clk = ~clk;
 
   rv32_mem_if imem ();
@@ -29,6 +31,7 @@ module tb_gls;
   asic_core_top dut (
     .clk_i            (clk),
     .rst_i            (rst),
+    .por_i            (por),
     .mtip_i           (1'b0),
     .imem_req_valid_o (imem.req_valid),
     .imem_req_ready_i (imem.req_ready),
@@ -67,6 +70,7 @@ module tb_gls;
     repeat (4) @(posedge clk);
     @(negedge clk);
     rst = 1'b0;
+    por = 1'b0;
   end
 
   always @(posedge clk) begin
