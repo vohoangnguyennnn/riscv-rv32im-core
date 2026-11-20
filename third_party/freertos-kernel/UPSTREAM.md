@@ -12,5 +12,5 @@ GCC RISC-V machine-mode port. All imported files are copied without
 modification. Project-specific configuration, startup code, chip-extension
 macros, BSP code, and the demonstration application live under `sw/`.
 
-Run `make freertos-check` to verify every imported file against the pinned
+From the repository root, run `make -C sw freertos-check` to verify every imported file against the pinned
 checksums in `SOURCE.sha256`.

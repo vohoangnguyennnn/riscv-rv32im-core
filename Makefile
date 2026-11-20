@@ -440,6 +440,7 @@ help:
 	@echo "  make benchmark    Run four CPI/IPC microbenchmarks and write build/generated-reports/performance.md"
 	@echo "  make coremark     Run standard 2K performance/validation seeds and write build/generated-reports/coremark.md"
 	@echo "  make baremetal-X  Build and run one software test (smoke or trap)"
+	@echo "  make isa-fetch    Fetch/verify omitted pinned riscv-tests sources (network required)"
 	@echo "  make isa          Run the complete Gate 6 RV32I/RV32M ISA suite"
 	@echo "  make isa-rv32ui   Run all in-scope upstream rv32ui tests"
 	@echo "  make isa-rv32um   Run all upstream rv32um tests"

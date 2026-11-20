@@ -13,8 +13,9 @@
 #define RVMODEL_IO_INIT(_R1, _R2, _R3)
 #define RVMODEL_IO_WRITE_STR(_R1, _R2, _R3, _STR_PTR)
 
-// The present milestone has no asynchronous interrupt inputs. ACT4 requires
-// these platform hooks to exist even when privileged tests are excluded.
+// This I/M-only ACT4 harness ties the core's MTIP input low. ACT4 requires
+// these platform hooks even though privileged/interrupt tests are excluded;
+// they do not describe the production SoC's implemented timer interrupt.
 #define RVMODEL_INTERRUPT_LATENCY 10
 #define RVMODEL_TIMER_INT_SOON_DELAY 100
 #define RVMODEL_SET_MEXT_INT(_R1, _R2)
